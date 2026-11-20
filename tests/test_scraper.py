@@ -102,3 +102,24 @@ def test_no_repeat_and_ios_recheck(tmp_path):
     scrape(cfg, f, sleep=lambda s: None)  # search done + app known -> only the failed iOS check is retried
     assert f.detail_calls == 1 and f.searches == 1
     assert list(csv.DictReader(open(tmp_path / "a.csv")))[0]["App Store URL"].endswith("/x")
+
+
+def test_all_countries_and_repeat_window(tmp_path):
+    import sqlite3
+    from scraper.run import resolve_countries
+    assert "us" in resolve_countries("ALL") and len(resolve_countries("ALL")) > 200
+
+    class Good(Fake):
+        searches = 0
+        def search(self, t, c, l, n): Good.searches += 1; return [{"appId": "com.a"}]
+        def details(self, p, c, l):
+            self.detail_calls += 1
+            return {"title": "A", "developer": "D", "developerEmail": "s@d.io", "developerAddress": "Pune, India"}
+    cfg = CFG(tmp_path); cfg.update(search_repeat_days=30)
+    f = Good(); scrape(cfg, f, sleep=lambda s: None)
+    assert (Good.searches, f.detail_calls) == (1, 1)
+    scrape(cfg, f, sleep=lambda s: None)
+    assert (Good.searches, f.detail_calls) == (1, 1)  # finished and inside the repeat window
+    con = sqlite3.connect(cfg["db_path"]); con.execute("UPDATE searches SET done_at='2000-01-01'"); con.commit()
+    scrape(cfg, f, sleep=lambda s: None)
+    assert (Good.searches, f.detail_calls) == (2, 1)  # search repeats, stored app is not fetched again

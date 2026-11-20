@@ -42,3 +42,6 @@ Cold B2B email is lawful in many places but regulated: include a real sender ide
 
 ## Filtering for a campaign
 Both CSVs end with `Play Store URL`/`App Store URL` (blank when the app isn't on that store) and a `Both Stores` column (`Yes`/`No`). In `contacts.csv` filter on `Both Stores = Yes` for apps on both stores, or on whichever URL column is non-blank for Google-Play-only / App-Store-only lists. `require_ios` is `false` by default, so `contacts.csv` contains everyone and you filter in your email tool; set it `true` to limit the file to both-store developers.
+
+## Daily full coverage
+Defaults: `"categories": "ALL"` (all 49 categories), `"countries": "ALL"` (every ISO country code; ones Play doesn't serve fail 3 times and are then skipped until the repeat window), no per-run app limit, and a 10-hour time cap (`max_runtime_minutes`). Each daily run does the due searches in order and stops at the time cap; the next run continues. A finished search comes due again after `search_repeat_days` (30) to pick up new apps, but apps already stored are never fetched again. Expect the first full pass (about 49 x 249 searches plus every app and App Store lookup) to take many days; lower `countries` to a list like `["us","gb","in"]` for a faster start.

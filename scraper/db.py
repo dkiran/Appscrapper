@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS apps (
   crawl_region TEXT, fetched_at TEXT, ios_url TEXT, ios_match TEXT
 );
 CREATE TABLE IF NOT EXISTS searches (
-  term TEXT, country TEXT, done_at TEXT, PRIMARY KEY (term, country)
+  term TEXT, country TEXT, done_at TEXT, attempts INTEGER DEFAULT 0, PRIMARY KEY (term, country)
 );
 """
 
@@ -32,6 +32,9 @@ def connect(path):
         conn.execute("ALTER TABLE apps ADD COLUMN support_email TEXT")
         conn.execute("UPDATE apps SET support_email = developer_email, developer_email = ''")
         conn.commit()
+    scols = {r["name"] for r in conn.execute("PRAGMA table_info(searches)")}
+    if "attempts" not in scols:
+        conn.execute("ALTER TABLE searches ADD COLUMN attempts INTEGER DEFAULT 0")
     for col in ("ios_url", "ios_match"):
         if col not in cols:
             conn.execute(f"ALTER TABLE apps ADD COLUMN {col} TEXT")
@@ -69,13 +72,27 @@ def known_packages(conn, refresh_after_days=None):
     return out
 
 
-def search_done(conn, term, country):
-    return conn.execute("SELECT 1 FROM searches WHERE term=? AND country=?", (term, country)).fetchone() is not None
+def searches_state(conn):
+    """{(term, country): done_at ISO string, or '' if never completed}"""
+    return {(r["term"], r["country"]): r["done_at"] or "" for r in conn.execute("SELECT term, country, done_at FROM searches")}
 
 
 def mark_search_done(conn, term, country):
-    conn.execute("INSERT OR REPLACE INTO searches VALUES (?,?,?)", (term, country, now()))
+    conn.execute("INSERT OR REPLACE INTO searches VALUES (?,?,?,0)", (term, country, now()))
     conn.commit()
+
+
+def search_failed(conn, term, country, max_attempts=3):
+    """Count a failed search; after max_attempts it is treated as done (retried after the repeat window)
+    so a country Play doesn't serve can't be retried every run forever."""
+    r = conn.execute("SELECT attempts FROM searches WHERE term=? AND country=?", (term, country)).fetchone()
+    attempts = ((r["attempts"] or 0) if r else 0) + 1
+    if attempts >= max_attempts:
+        mark_search_done(conn, term, country)
+        return True
+    conn.execute("INSERT OR REPLACE INTO searches VALUES (?,?,'',?)", (term, country, attempts))
+    conn.commit()
+    return False
 
 
 def pending_ios(conn, limit):

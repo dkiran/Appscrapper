@@ -1,6 +1,9 @@
 import json
 import logging
 import time
+from datetime import datetime, timedelta, timezone
+
+import pycountry
 
 from . import db
 from .ios import best_match
@@ -42,12 +45,33 @@ def _ios_check(cfg, fetcher, sleep, title, company, website, region):
     return (m.get("trackViewUrl") if m else ""), (why if m else "none")
 
 
+def resolve_countries(value):
+    if value in (None, "", "ALL"):
+        return sorted(c.alpha_2.lower() for c in pycountry.countries)
+    return [c.lower() for c in value]
+
+
+def due_searches(conn, countries, terms, repeat_days):
+    """Searches never finished first (in config order), then finished ones older than repeat_days, oldest first."""
+    state = db.searches_state(conn)
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=repeat_days)).isoformat() if repeat_days else None
+    todo = []
+    for c in countries:
+        for t in terms:
+            done = state.get((t, c), "")
+            if not done or (cutoff and done < cutoff):
+                todo.append((done, c, t))
+    todo.sort(key=lambda x: x[0])  # stable: unfinished ("") keep config order
+    return [(c, t) for _, c, t in todo]
+
+
 def scrape(cfg, fetcher, sleep=time.sleep):
     """Never re-fetches a stored app and never repeats a finished search; never drops a scraped app
     (App Store / developer-country conditions only filter the contacts file)."""
     conn = db.connect(cfg["db_path"])
     known = db.known_packages(conn, cfg.get("refresh_after_days"))
-    budget = cfg["max_new_apps_per_run"]
+    budget = cfg.get("max_new_apps_per_run") or float("inf")
+    deadline = time.monotonic() + 60 * cfg["max_runtime_minutes"] if cfg.get("max_runtime_minutes") else None
     saved = failed = 0
     terms = list(cfg.get("search_terms") or []) + category_terms(cfg.get("categories"))
 
@@ -58,18 +82,22 @@ def scrape(cfg, fetcher, sleep=time.sleep):
                 db.set_ios(conn, r["package"], url, why)
                 log.info("  App Store check %s: %s", r["package"], why)
 
-    todo = [(c, t) for c in cfg["countries"] for t in terms if not db.search_done(conn, t, c)]
-    if not todo:
-        log.info("every configured search is already done; add search_terms/categories/countries for more")
+    countries = resolve_countries(cfg.get("countries"))
+    todo = due_searches(conn, countries, terms, cfg.get("search_repeat_days"))
+    log.info("%d searches due (%d categories/terms x %d countries)", len(todo), len(terms), len(countries))
     for country, term in todo:
         if budget <= 0:
             log.info("per-run limit reached; the rest continues next run")
+            break
+        if deadline and time.monotonic() > deadline:
+            log.info("run time limit reached; the rest continues next run")
             break
         log.info("searching %r in %s ...", term, country)
         try:
             hits = fetcher.search(term, country, cfg["lang"], cfg["results_per_query"])
         except Exception as e:
             log.warning("search failed term=%r country=%s: %s", term, country, e)
+            db.search_failed(conn, term, country)
             failed += 1
             sleep(cfg["delay_seconds"])
             continue
