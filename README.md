@@ -51,3 +51,27 @@ Delays are randomised (about 0.7x to 1.5x of `delay_seconds`, default 4s), a run
 
 ## Order of work
 Searches run one category at a time across **every** country, in the order listed in `"categories"` (default: Business, Finance, Shopping, Food & Drink, Travel & Local, Lifestyle, Education, Health & Fitness), then the next category. So after the first category every country has been covered once. Put a single category in the list to cover only that one.
+
+## Run on a server (PostgreSQL, Docker)
+Data now lives in a database, not CSV files. With `DATABASE_URL` set (or `database_url` in `config.json`) the scraper uses PostgreSQL; without it, it falls back to the local SQLite file `data/apps.db`. CSV files are written only when you ask (`python main.py --export`, or `"export_csv": true`).
+
+On any Linux server with Docker:
+```bash
+git clone https://github.com/dkiran/Appscrapper.git && cd Appscrapper
+cp .env.example .env            # then edit: set a strong POSTGRES_PASSWORD
+docker compose up -d --build    # starts Postgres + the scheduler (daily at schedule_cron, default 02:00 UTC)
+docker compose logs -f scraper  # watch progress
+```
+Set `"run_on_start": true` in `config.json` to also scrape immediately when the container starts. Postgres listens on the server's localhost only; keep it that way, and use an SSH tunnel to query it from your laptop (`ssh -L 5432:localhost:5432 user@server`).
+
+Tables: `apps` (every app; `both_stores` is `Yes`/`No`), `contacts` (one row per company, rebuilt after each run), `searches` (which searches are done). Examples:
+```sql
+SELECT * FROM contacts WHERE both_stores = 'Yes';
+SELECT company, support_email, developer_email, ios_url FROM apps WHERE both_stores = 'Yes' AND country = 'India';
+SELECT COUNT(*) FROM apps WHERE ios_url = '';           -- Google Play only
+```
+CSV when needed: `docker compose exec scraper python main.py --export` writes `data/apps.csv` and `data/contacts.csv` on the server.
+
+Move an existing local SQLite file into Postgres: `docker compose cp data/apps.db scraper:/tmp/apps.db && docker compose exec scraper python main.py --import-sqlite /tmp/apps.db`.
+
+Back up with `docker compose exec db pg_dump -U scraper scraper > backup.sql`.

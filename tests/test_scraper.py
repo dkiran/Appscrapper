@@ -1,8 +1,23 @@
 import csv
+import os
+
+import pytest
 from scraper.country import country_from_address
 from scraper.run import scrape
 
-CFG = lambda tmp: {"db_path": str(tmp / "a.db"), "csv_path": str(tmp / "a.csv"),
+PG = os.environ.get("TEST_DATABASE_URL")  # set to run the same tests against PostgreSQL
+
+
+@pytest.fixture(autouse=True)
+def clean_pg():
+    if PG:
+        import psycopg
+        with psycopg.connect(PG, autocommit=True) as c:
+            c.execute("DROP TABLE IF EXISTS apps, searches, contacts")
+    yield
+
+
+CFG = lambda tmp: {"database_url": PG, "export_csv": True, "db_path": str(tmp / "a.db"), "csv_path": str(tmp / "a.csv"),
                    "search_terms": ["x"], "countries": ["us"], "lang": "en",
                    "results_per_query": 5, "max_new_apps_per_run": 10,
                    "delay_seconds": 0, "refresh_after_days": 30,
@@ -105,8 +120,8 @@ def test_no_repeat_and_ios_recheck(tmp_path):
 
 
 def test_all_countries_and_repeat_window(tmp_path):
-    import sqlite3
-    from scraper.run import resolve_countries
+    from scraper import db
+    from scraper.run import resolve_countries, db_target
     assert "us" in resolve_countries("ALL") and len(resolve_countries("ALL")) > 200
 
     class Good(Fake):
@@ -120,7 +135,7 @@ def test_all_countries_and_repeat_window(tmp_path):
     assert (Good.searches, f.detail_calls) == (1, 1)
     scrape(cfg, f, sleep=lambda s: None)
     assert (Good.searches, f.detail_calls) == (1, 1)  # finished and inside the repeat window
-    con = sqlite3.connect(cfg["db_path"]); con.execute("UPDATE searches SET done_at='2000-01-01'"); con.commit()
+    con = db.connect(db_target(cfg)); con.execute("UPDATE searches SET done_at='2000-01-01'"); con.commit(); con.close()
     scrape(cfg, f, sleep=lambda s: None)
     assert (Good.searches, f.detail_calls) == (2, 1)  # search repeats, stored app is not fetched again
 
@@ -138,10 +153,30 @@ def test_stops_after_consecutive_failures_and_jitters(tmp_path):
 
 
 def test_order_is_category_across_all_countries_first(tmp_path):
-    import sqlite3
     from scraper import db
     from scraper.run import due_searches
-    conn = db.connect(str(tmp_path / "o.db"))
+    conn = db.connect(PG or str(tmp_path / "o.db"))
     order = due_searches(conn, ["us", "in", "ke"], ["Business", "Finance"], 30)
     assert order == [("us", "Business"), ("in", "Business"), ("ke", "Business"),
                      ("us", "Finance"), ("in", "Finance"), ("ke", "Finance")]
+
+
+def test_database_is_the_store_and_import(tmp_path):
+    from scraper import db
+    from scraper.run import db_target
+    cfg = CFG(tmp_path); cfg["export_csv"] = False
+    scrape(cfg, Fake(), sleep=lambda s: None)
+    assert not (tmp_path / "a.csv").exists()  # no CSV unless asked for
+    conn = db.connect(db_target(cfg))
+    r = conn.execute("SELECT app, support_email, both_stores FROM apps").fetchall()
+    assert [(x["app"], x["support_email"], x["both_stores"]) for x in r] == [("A", "support@acme.io", "No")]
+    assert conn.execute("SELECT COUNT(*) AS n FROM contacts").fetchone()["n"] == 1
+    # import from an old SQLite file
+    import sqlite3
+    old = tmp_path / "old.db"
+    o = sqlite3.connect(old)
+    o.execute("CREATE TABLE apps (package TEXT PRIMARY KEY, app TEXT, url TEXT, support_email TEXT)")
+    o.execute("INSERT INTO apps VALUES ('com.old','Old','https://play/x','o@o.io')"); o.commit(); o.close()
+    assert db.import_sqlite(str(old), conn) == 1
+    assert conn.execute("SELECT COUNT(*) AS n FROM apps").fetchone()["n"] == 2
+    assert db.export_csv(conn, str(tmp_path / "x.csv")) == 2

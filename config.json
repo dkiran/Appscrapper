@@ -28,5 +28,8 @@
   "ios_recheck_per_run": 50,
   "max_runtime_minutes": 600,
   "search_repeat_days": 30,
-  "max_consecutive_failures": 10
+  "max_consecutive_failures": 10,
+  "export_csv": false,
+  "run_on_start": false,
+  "database_url": null
 }

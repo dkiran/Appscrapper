@@ -1,4 +1,5 @@
 google-play-scraper==1.2.7
 APScheduler==3.11.3
 pycountry
+psycopg[binary]>=3.1
 pytest
