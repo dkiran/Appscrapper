@@ -16,7 +16,8 @@ System cron alternative: `0 2 * * * cd /path/playstore-scraper && python main.py
 ## Config (`config.json`)
 - `search_terms` + `countries`: how apps are discovered (Play has no "list all apps" endpoint).
 - `max_new_apps_per_run`, `delay_seconds`: throttle. Keep them conservative to avoid blocks.
-- `refresh_after_days`: apps fetched more recently than this are skipped.
+- Nothing is scraped twice: stored apps are never fetched again, and a finished (term, country) search is skipped on later runs, so each scheduled run works through the *next* searches. When all are done it says so; add terms/categories/countries for more. `refresh_after_days` (default `null` = never) can be set to re-fetch old apps.
+- Nothing scraped is dropped: `apps.csv` holds every app. `require_ios` and `developer_countries` only filter `contacts.csv`. Apps whose App Store check failed or never ran are re-checked at the start of later runs (`ios_recheck_per_run`).
 
 ## Notes
 - `Email` = the "App support" email. `Developer email` = a different email in the page's "About the developer" block (blank if none, or if it equals the support email). Run `python main.py --inspect <package>` to see every bare email on a page and its position in the data if a result looks wrong.
@@ -28,11 +29,11 @@ System cron alternative: `0 2 * * * cd /path/playstore-scraper && python main.py
 - `python main.py --list-categories` prints every category id (32 app + 17 game categories).
 - `"categories"` in `config.json`: `"ALL"`, `"APPS"`, `"GAMES"` or a list such as `["FINANCE", "MEDICAL"]`. Each category name is searched as a term, in addition to `search_terms`. The Category column is always the app's real category.
 - `"countries"`: Play Store regions searched (two-letter codes, e.g. `["us", "in", "ke"]`); results differ by region.
-- `"developer_countries"`: e.g. `["India", "Kenya"]` keeps only apps whose developer address ends in that country (empty = keep all).
+- `"developer_countries"`: e.g. `["India", "Kenya"]` limits `contacts.csv` to developers whose address ends in that country (empty = all).
 - Raise `max_new_apps_per_run` and `results_per_query` for wider coverage; search returns only a limited number of hits per term, so more terms = more apps.
 
 ## Both stores + campaign list
-- `"check_ios": true` looks each app up in Apple's public iTunes Search API and fills `App Store URL` and `iOS match` (`website+title` or `title+developer`; weaker matches are rejected). `"require_ios": true` keeps only apps found on both stores. Lookups are throttled by `ios_delay_seconds` (Apple allows roughly 20 requests/minute).
+- `"check_ios": true` looks each app up in Apple's public iTunes Search API and fills `App Store URL` and `iOS match` (`website+title` or `title+developer`; weaker matches are rejected). `"require_ios": true` limits `contacts.csv` to apps found on both stores. Lookups are throttled by `ios_delay_seconds` (Apple allows roughly 20 requests/minute).
 - `data/contacts.csv` has one row per company and support email (with its apps listed), so a campaign sends each company one email rather than one per app. Use this file for outreach, not `apps.csv`.
 - Matching is a best guess by name, developer and website; spot-check a sample before mailing.
 

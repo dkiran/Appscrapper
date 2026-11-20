@@ -14,6 +14,9 @@ CREATE TABLE IF NOT EXISTS apps (
   support_email TEXT, developer_email TEXT, developer_address TEXT, country TEXT,
   crawl_region TEXT, fetched_at TEXT, ios_url TEXT, ios_match TEXT
 );
+CREATE TABLE IF NOT EXISTS searches (
+  term TEXT, country TEXT, done_at TEXT, PRIMARY KEY (term, country)
+);
 """
 
 
@@ -51,8 +54,10 @@ def upsert(conn, row):
     conn.commit()
 
 
-def known_packages(conn, refresh_after_days):
-    """Packages fetched recently enough that they need no refresh."""
+def known_packages(conn, refresh_after_days=None):
+    """Packages that must not be fetched again. With refresh_after_days unset, that is every stored app."""
+    if not refresh_after_days:
+        return {r["package"] for r in conn.execute("SELECT package FROM apps")}
     cutoff = datetime.now(timezone.utc).timestamp() - refresh_after_days * 86400
     out = set()
     for r in conn.execute("SELECT package, fetched_at FROM apps"):
@@ -62,6 +67,26 @@ def known_packages(conn, refresh_after_days):
         except (TypeError, ValueError):
             pass
     return out
+
+
+def search_done(conn, term, country):
+    return conn.execute("SELECT 1 FROM searches WHERE term=? AND country=?", (term, country)).fetchone() is not None
+
+
+def mark_search_done(conn, term, country):
+    conn.execute("INSERT OR REPLACE INTO searches VALUES (?,?,?)", (term, country, now()))
+    conn.commit()
+
+
+def pending_ios(conn, limit):
+    """Stored apps whose App Store check never ran or failed."""
+    return conn.execute("SELECT package, app, company, website, crawl_region FROM apps "
+                        "WHERE ios_match IS NULL OR ios_match = 'unchecked' LIMIT ?", (limit,)).fetchall()
+
+
+def set_ios(conn, package, url, match):
+    conn.execute("UPDATE apps SET ios_url=?, ios_match=? WHERE package=?", (url, match, package))
+    conn.commit()
 
 
 def export_csv(conn, path):
@@ -82,11 +107,13 @@ def export_csv(conn, path):
 CONTACT_COLUMNS = ["Email", "Developer email", "Company", "Website", "Country", "Apps", "App count", "Sample Play Store URL", "Sample App Store URL"]
 
 
-def export_contacts(conn, path, require_ios=False):
+def export_contacts(conn, path, require_ios=False, countries=None):
     """One row per company+support email, so a campaign doesn't mail the same person once per app."""
     where = "WHERE ios_url IS NOT NULL AND ios_url != ''" if require_ios else ""
     groups = {}
     for r in conn.execute(f"SELECT * FROM apps {where} ORDER BY app"):
+        if countries and (r["country"] or "").lower() not in {c.lower() for c in countries}:
+            continue
         key = ((r["support_email"] or r["developer_email"] or "").split(",")[0].strip().lower(),
                (r["company"] or "").lower())
         if not key[0]:

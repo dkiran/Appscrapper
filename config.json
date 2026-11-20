@@ -18,11 +18,12 @@
   "results_per_query": 10,
   "max_new_apps_per_run": 50,
   "delay_seconds": 1.5,
-  "refresh_after_days": 30,
   "categories": [],
   "developer_countries": [],
   "check_ios": true,
   "require_ios": true,
   "ios_delay_seconds": 3,
-  "contacts_path": "data/contacts.csv"
+  "contacts_path": "data/contacts.csv",
+  "refresh_after_days": null,
+  "ios_recheck_per_run": 50
 }

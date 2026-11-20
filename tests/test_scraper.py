@@ -50,13 +50,21 @@ def test_page_email_extraction():
     assert [e for _, e in email_strings(blob)] == ["a@b.com", "Support@B.com", "c@d.org"]
 
 
-def test_categories_and_country_filter(tmp_path):
+def test_categories_terms():
     from scraper.categories import category_terms
     assert category_terms(["FINANCE"]) == ["Finance"] and len(category_terms("ALL")) == 49
-    cfg = CFG(tmp_path); cfg.update(search_terms=[], categories=["FINANCE"], developer_countries=["India"])
-    assert scrape(cfg, Fake(), sleep=lambda s: None)["saved"] == 0  # Fake dev is in Kenya
-    cfg["developer_countries"] = ["Kenya"]
-    assert scrape(cfg, Fake(), sleep=lambda s: None)["saved"] == 1
+
+
+def _contacts(tmp_path):
+    return list(csv.DictReader(open(tmp_path / "c.csv")))
+
+
+def test_nothing_dropped_filters_only_contacts(tmp_path):
+    cfg = CFG(tmp_path); cfg.update(check_ios=True, require_ios=True, ios_delay_seconds=0,
+                                    developer_countries=["India"])
+    r = scrape(cfg, Fake(), sleep=lambda s: None)
+    assert r["saved"] == 1  # saved although no App Store match and developer is in Kenya
+    assert len(list(csv.DictReader(open(tmp_path / "a.csv")))) == 1 and _contacts(tmp_path) == []
 
 
 def test_ios_match_and_require(tmp_path):
@@ -67,9 +75,26 @@ def test_ios_match_and_require(tmp_path):
     assert best_match("A", "Other Co", "https://x.com", [cand])[0] is None
     assert best_match("Alpha", "Acme", "https://acme.io", [cand])[0] is None
     cfg = CFG(tmp_path); cfg.update(check_ios=True, require_ios=True, ios_delay_seconds=0)
-    assert scrape(cfg, Fake(), sleep=lambda s: None)["saved"] == 0
     f = Fake(); f.ios = [cand]
-    assert scrape(cfg, f, sleep=lambda s: None)["saved"] == 1
+    scrape(cfg, f, sleep=lambda s: None)
     rows = list(csv.DictReader(open(tmp_path / "a.csv")))
-    assert rows[0]["App Store URL"].startswith("https://apps.apple.com")
-    assert len(list(csv.DictReader(open(tmp_path / "c.csv")))) == 1
+    assert rows[0]["App Store URL"].startswith("https://apps.apple.com") and len(_contacts(tmp_path)) == 1
+
+
+def test_no_repeat_and_ios_recheck(tmp_path):
+    class Flaky(Fake):
+        def ios_lookup(self, t, c):
+            if self.down: raise RuntimeError("apple down")
+            return super().ios_lookup(t, c)
+        def details(self, p, c, l):
+            self.detail_calls += 1
+            return {"title": p, "developer": "D", "developerEmail": "s@d.io", "developerAddress": "Pune, India"}
+        def search(self, t, c, l, n): self.searches += 1; return [{"appId": "com.a"}]
+    f = Flaky(); f.down = True; f.searches = 0
+    cfg = CFG(tmp_path); cfg.update(check_ios=True, ios_delay_seconds=0)
+    scrape(cfg, f, sleep=lambda s: None)
+    assert f.detail_calls == 1 and f.searches == 1
+    f.down = False; f.ios = [{"trackName": "com.a", "trackViewUrl": "https://apps.apple.com/x", "sellerName": "D"}]
+    scrape(cfg, f, sleep=lambda s: None)  # search done + app known -> only the failed iOS check is retried
+    assert f.detail_calls == 1 and f.searches == 1
+    assert list(csv.DictReader(open(tmp_path / "a.csv")))[0]["App Store URL"].endswith("/x")
