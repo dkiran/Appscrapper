@@ -135,3 +135,13 @@ def test_stops_after_consecutive_failures_and_jitters(tmp_path):
     r = scrape(cfg, f, sleep=delays.append)
     assert f.detail_calls == 3 and r["failed"] == 3  # stopped early instead of hammering 20 apps
     assert delays and all(2.8 <= d <= 6.0 for d in delays) and len(set(delays)) > 1
+
+
+def test_order_is_category_across_all_countries_first(tmp_path):
+    import sqlite3
+    from scraper import db
+    from scraper.run import due_searches
+    conn = db.connect(str(tmp_path / "o.db"))
+    order = due_searches(conn, ["us", "in", "ke"], ["Business", "Finance"], 30)
+    assert order == [("us", "Business"), ("in", "Business"), ("ke", "Business"),
+                     ("us", "Finance"), ("in", "Finance"), ("ke", "Finance")]

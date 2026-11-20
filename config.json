@@ -9,7 +9,16 @@
   "results_per_query": 30,
   "max_new_apps_per_run": 1500,
   "delay_seconds": 4,
-  "categories": "ALL",
+  "categories": [
+    "BUSINESS",
+    "FINANCE",
+    "SHOPPING",
+    "FOOD_AND_DRINK",
+    "TRAVEL_AND_LOCAL",
+    "LIFESTYLE",
+    "EDUCATION",
+    "HEALTH_AND_FITNESS"
+  ],
   "developer_countries": [],
   "check_ios": true,
   "require_ios": false,

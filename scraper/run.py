@@ -53,12 +53,12 @@ def resolve_countries(value):
 
 
 def due_searches(conn, countries, terms, repeat_days):
-    """Searches never finished first (in config order), then finished ones older than repeat_days, oldest first."""
+    """Searches never finished first (term by term, each across all countries), then finished ones older than repeat_days, oldest first."""
     state = db.searches_state(conn)
     cutoff = (datetime.now(timezone.utc) - timedelta(days=repeat_days)).isoformat() if repeat_days else None
     todo = []
-    for c in countries:
-        for t in terms:
+    for t in terms:  # one term/category across every country before the next term
+        for c in countries:
             done = state.get((t, c), "")
             if not done or (cutoff and done < cutoff):
                 todo.append((done, c, t))
