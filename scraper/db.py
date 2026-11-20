@@ -61,11 +61,14 @@ def connect(target):
         d = os.path.dirname(target)
         if d:
             os.makedirs(d, exist_ok=True)
-        raw = sqlite3.connect(target)
+        raw = sqlite3.connect(target, timeout=30)
         raw.row_factory = sqlite3.Row
+        raw.execute("PRAGMA journal_mode=WAL")  # lets the dashboard read while the scraper writes
         conn = Conn(raw, False)
     for stmt in SCHEMA[:3]:
         conn.execute(stmt)
+    pk = "BIGSERIAL PRIMARY KEY" if conn.pg else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    conn.execute(f"CREATE TABLE IF NOT EXISTS logs (id {pk}, ts TEXT, level TEXT, message TEXT)")
     cols = conn.columns("apps")
     if "support_email" not in cols:  # very old DB: developer_email used to hold the support email
         conn.execute("ALTER TABLE apps ADD COLUMN support_email TEXT")

@@ -291,3 +291,33 @@ def test_dashboard_stats_and_server(tmp_path, monkeypatch):
     req = urllib.request.Request(base + "/api/stats", headers={"Authorization": "Basic " + base64.b64encode(b"u:pw").decode()})
     assert json.load(urllib.request.urlopen(req))["total"] == 1
     srv.shutdown()
+
+
+def test_logs_reach_database_and_dashboard(tmp_path):
+    import json, logging, threading, urllib.request
+    import dashboard
+    from scraper import db
+    from scraper.dblog import DbLogHandler
+    from scraper.run import db_target
+    cfg = CFG(tmp_path); cfg.update(categories=["FINANCE", "MEDICAL"], search_terms=[], countries=["us", "in"])
+    h = DbLogHandler(db_target(cfg)); lg = logging.getLogger("playstore"); lg.addHandler(h); lg.setLevel(logging.INFO)
+    try:
+        scrape(cfg, Fake(), sleep=lambda s: None)
+        lg.warning("custom <b>warning</b>")
+    finally:
+        lg.removeHandler(h); h.close()
+    conn = db.connect(db_target(cfg))
+    allrows = dashboard.collect_logs(conn)
+    assert any("run started" in r["message"] for r in allrows) and allrows[-1]["message"] == "custom <b>warning</b>"
+    assert [r["level"] for r in dashboard.collect_logs(conn, issues=True)][-1] == "WARNING"
+    assert dashboard.collect_logs(conn, after=allrows[-1]["id"]) == []
+    st = dashboard.collect_stats(conn, cfg=cfg)
+    assert st["ios_total"] == 0 and st["android_total"] == 1 and st["both"] == 0
+    assert st["categories"] == {"done": 0, "total": 2} and st["countries"]["total"] == 2  # Fake always has a failing app
+    srv = dashboard.make_server(db_target(cfg), "127.0.0.1", 0, cfg)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    got = json.load(urllib.request.urlopen(base + "/api/logs?after=0&issues=1"))
+    assert got and all(x["level"] != "INFO" for x in got)
+    assert json.load(urllib.request.urlopen(base + "/api/stats"))["categories"]["total"] == 2
+    srv.shutdown()

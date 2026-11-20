@@ -37,6 +37,15 @@ th,td{text-align:right;padding:6px 8px;border-bottom:1px solid var(--line)}
 th:first-child,td:first-child{text-align:left}
 th{color:var(--ink2);font-weight:500}
 .err{color:#e34948;margin:8px 0}
+.logs{margin-top:16px}
+.loghead{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+select{background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:4px 6px;font:inherit;font-size:13px}
+.logbox{height:340px;overflow:auto;background:var(--page);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.ln{display:flex;gap:10px;white-space:pre-wrap;word-break:break-word}
+.ln .t{color:var(--muted);flex:none}.ln .lv{flex:none;width:62px;color:var(--ink2)}
+.ln.bad .lv,.ln.bad .m{font-weight:700;color:var(--ink)}
+.ln.bad::before{content:"⚠";flex:none;color:var(--ink)}
+.empty{color:var(--muted)}
 @media (max-width:520px){.tile.hero{grid-column:span 1}.tile .v{font-size:24px}}
 </style>
 </head>
@@ -48,9 +57,13 @@ th{color:var(--ink2);font-weight:500}
   </header>
   <div id="err" class="err" hidden></div>
   <section class="tiles" aria-label="Totals">
-    <div class="tile hero"><div class="v" id="total">–</div><div class="l">apps collected so far</div></div>
+    <div class="tile hero"><div class="v" id="total">–</div><div class="l">total apps collected</div></div>
+    <div class="tile"><div class="v" id="ios">–</div><div class="l">iOS apps</div></div>
+    <div class="tile"><div class="v" id="android">–</div><div class="l">Android apps</div></div>
+    <div class="tile"><div class="v" id="both">–</div><div class="l">on both (iOS &amp; Android)</div></div>
+    <div class="tile"><div class="v" id="cats">–</div><div class="l">categories searched</div></div>
+    <div class="tile"><div class="v" id="ctry">–</div><div class="l">countries searched</div></div>
     <div class="tile"><div class="v" id="today">–</div><div class="l">saved today</div></div>
-    <div class="tile"><div class="v" id="both">–</div><div class="l">on both stores</div></div>
     <div class="tile"><div class="v" id="aso">–</div><div class="l">App Store only</div></div>
     <div class="tile"><div class="v" id="po">–</div><div class="l">Google Play only</div></div>
     <div class="tile"><div class="v" id="unres">–</div><div class="l">App Store apps not yet matched to Android</div></div>
@@ -66,6 +79,13 @@ th{color:var(--ink2);font-weight:500}
     <button class="toggle" id="toggle" aria-expanded="false">Show as table</button>
     <div id="tablewrap" hidden></div>
   </section>
+  <section class="card logs">
+    <div class="loghead">
+      <div><h2>Status log</h2><div class="sub" id="logsub">Same lines the scraper prints in the console, newest at the bottom</div></div>
+      <label class="sub">Show <select id="logfilter"><option value="0">all messages</option><option value="1">warnings and errors only</option></select></label>
+    </div>
+    <div class="logbox" id="logbox" role="log" aria-live="off" tabindex="0"></div>
+  </section>
 </main>
 <script>
 const $ = id => document.getElementById(id);
@@ -74,10 +94,13 @@ const dayLabel = s => new Date(s + 'T00:00:00Z').toLocaleDateString(undefined, {
 function render(s){
   $('err').hidden = true;
   $('total').textContent = fmt(s.total); $('today').textContent = fmt(s.today);
+  $('ios').textContent = fmt(s.ios_total); $('android').textContent = fmt(s.android_total);
+  $('cats').textContent = fmt(s.categories.done) + ' of ' + fmt(s.categories.total); $('ctry').textContent = fmt(s.countries.done) + ' of ' + fmt(s.countries.total);
   $('both').textContent = fmt(s.both); $('aso').textContent = fmt(s.app_store_only); $('po').textContent = fmt(s.play_only);
   $('unres').textContent = fmt(s.unresolved); $('email').textContent = fmt(s.with_email);
   $('comp').textContent = fmt(s.companies); $('srch').textContent = fmt(s.searches_done);
-  $('status').textContent = s.last_saved ? 'Last record saved ' + s.last_saved.replace('T',' ').replace(/\+00:00$/,' UTC') : 'No records yet';
+  const ago = s.last_log ? Math.max(0, Math.round((Date.now() - Date.parse(s.last_log)) / 60000)) : null;
+  $('status').textContent = (s.last_saved ? 'Last record saved ' + s.last_saved.replace('T',' ').replace(/\+00:00$/,' UTC') : 'No records yet') + (ago === null ? ' · no log activity yet' : ' · last log ' + (ago < 1 ? 'just now' : ago < 120 ? ago + ' min ago' : Math.round(ago/60) + ' h ago'));
   const max = Math.max(1, ...s.days.map(d => d.saved)), chart = $('chart');
   chart.innerHTML = '<span class="peak">' + fmt(max) + '</span><span class="last">' + fmt(s.days[s.days.length-1].saved) + ' today</span>';
   s.days.forEach(d => {
@@ -101,7 +124,30 @@ async function load(){
     if (!r.ok) throw new Error(s.error || r.status); render(s);
   } catch(e){ $('err').hidden = false; $('err').textContent = 'Could not load stats: ' + e.message; }
 }
-load(); setInterval(load, 30000);
+let lastId = 0, issuesOnly = '0';
+async function loadLogs(reset){
+  const box = $('logbox');
+  if (reset) { lastId = 0; box.textContent = ''; }
+  try {
+    const r = await fetch('/api/logs?after=' + lastId + '&issues=' + issuesOnly, {cache:'no-store'});
+    const rows = await r.json(); if (!r.ok) throw new Error(rows.error || r.status);
+    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+    if (!rows.length && !box.children.length) box.innerHTML = '<div class="empty">No log lines yet.</div>';
+    if (rows.length && box.querySelector('.empty')) box.textContent = '';
+    for (const x of rows) {
+      lastId = Math.max(lastId, x.id);
+      const d = document.createElement('div'); d.className = 'ln' + (x.level === 'INFO' ? '' : ' bad');
+      for (const [cls, txt] of [['t', (x.ts || '').slice(11, 19)], ['lv', x.level], ['m', x.message]]) {
+        const sp = document.createElement('span'); sp.className = cls; sp.textContent = txt; d.appendChild(sp);
+      }
+      box.appendChild(d);
+    }
+    while (box.children.length > 1000) box.removeChild(box.firstChild);
+    if (rows.length && (atBottom || reset)) box.scrollTop = box.scrollHeight;
+  } catch(e){ /* the stats call already shows connection errors */ }
+}
+$('logfilter').onchange = e => { issuesOnly = e.target.value; loadLogs(true); };
+load(); loadLogs(true); setInterval(load, 30000); setInterval(() => loadLogs(false), 5000);
 </script>
 </body>
 </html>

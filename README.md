@@ -87,7 +87,7 @@ At the start of each run (iOS-first mode), up to `resolve_per_run` (default 250)
 Budget: `max_new_apps_per_run` (1000) plus `resolve_per_run` (250) is roughly 1,500 Google requests a day; keep the total near that.
 
 ## Monitor page
-A read-only page showing totals (collected, both stores, App Store only, Google Play only, with email, companies, searches finished) and records saved per day for the last 30 days, with a table view. It shows counts only, no emails.
+A read-only page showing totals (total apps, iOS apps, Android apps, both stores, categories and countries searched out of those configured, App Store only, Google Play only, with email, companies, searches finished), records saved per day for the last 30 days (with a table view), and a **status log** at the bottom with the same lines the scraper prints in the console (refreshes every 5 seconds; filter to warnings and errors; the last 20,000 lines are kept in the `logs` table). It shows counts and log lines only, no email addresses.
 - Local: `python dashboard.py`, then open http://127.0.0.1:8080 (uses `DATABASE_URL` if set, otherwise the SQLite file from `config.json`).
 - Server: `docker compose up -d --build` also starts it on the server's port 8080 (localhost only). View it from your laptop with `ssh -L 8080:localhost:8080 user@server` then http://localhost:8080. Set `DASHBOARD_PASSWORD` in `.env` to require a password (any username). If you expose it publicly, put it behind HTTPS (e.g. Caddy or nginx) because the password is sent as HTTP Basic auth.
 - "Saved per day" uses the date each record was last saved (UTC), so a record updated later (for example resolved to its Android app) moves to the newer day.

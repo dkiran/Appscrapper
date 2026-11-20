@@ -29,6 +29,10 @@ def main():
         return
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     cfg = load_config(args.config)
+    if not (args.export or args.import_sqlite):
+        from scraper.dblog import DbLogHandler
+        from scraper.run import db_target as _target
+        logging.getLogger().addHandler(DbLogHandler(_target(cfg)))  # same lines as the console, for the dashboard
     if args.export or args.import_sqlite:
         from scraper import db
         from scraper.run import db_target

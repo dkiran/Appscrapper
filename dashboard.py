@@ -11,7 +11,8 @@ from datetime import date, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from scraper import db
-from scraper.run import db_target, load_config
+from scraper.categories import category_terms
+from scraper.run import db_target, load_config, resolve_countries
 
 DAYS = 30
 
@@ -20,7 +21,28 @@ def _n(conn, where=""):
     return conn.execute(f"SELECT COUNT(*) AS n FROM apps {where}").fetchone()["n"]
 
 
-def collect_stats(conn, today=None):
+def collect_logs(conn, after=0, limit=300, issues=False):
+    where = "level IN ('WARNING','ERROR','CRITICAL')" if issues else "1=1"
+    if after:
+        rows = conn.execute(f"SELECT id, ts, level, message FROM logs WHERE id > ? AND {where} ORDER BY id LIMIT ?", (after, limit)).fetchall()
+    else:
+        rows = list(reversed(conn.execute(f"SELECT id, ts, level, message FROM logs WHERE {where} ORDER BY id DESC LIMIT ?", (limit,)).fetchall()))
+    return [{"id": r["id"], "ts": r["ts"], "level": r["level"], "message": r["message"]} for r in rows]
+
+
+def coverage(conn, cfg):
+    """Configured categories/countries and how many have at least one finished search."""
+    cfg = cfg or {}
+    terms = list(cfg.get("search_terms") or []) + category_terms(cfg.get("categories"))
+    countries = resolve_countries(cfg.get("countries"))
+    done = [(r["term"], r["country"]) for r in conn.execute("SELECT term, country FROM searches WHERE done_at <> ''")]
+    done_terms = {t[4:] if t.startswith("ios:") else t for t, _ in done}
+    done_countries = {c for _, c in done}
+    return {"categories": {"done": len(done_terms & set(terms)), "total": len(terms)},
+            "countries": {"done": len(done_countries & set(countries)), "total": len(countries)}}
+
+
+def collect_stats(conn, today=None, cfg=None):
     today = today or date.today()
     per_day = {r["day"]: (r["saved"], r["both"]) for r in conn.execute(
         "SELECT SUBSTR(fetched_at, 1, 10) AS day, COUNT(*) AS saved, "
@@ -35,6 +57,10 @@ def collect_stats(conn, today=None):
     return {
         "total": _n(conn),
         "both": _n(conn, "WHERE both_stores = 'Yes'"),
+        "ios_total": _n(conn, "WHERE COALESCE(ios_url,'') <> ''"),
+        "android_total": _n(conn, "WHERE COALESCE(url,'') <> ''"),
+        **coverage(conn, cfg),
+        "last_log": (conn.execute("SELECT ts FROM logs ORDER BY id DESC LIMIT 1").fetchone() or {"ts": None})["ts"],
         "app_store_only": _n(conn, "WHERE COALESCE(url,'') = ''"),
         "play_only": _n(conn, "WHERE COALESCE(ios_url,'') = '' AND COALESCE(url,'') <> ''"),
         "unresolved": _n(conn, "WHERE ios_match = 'ios-only'"),
@@ -74,15 +100,21 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("WWW-Authenticate", 'Basic realm="scraper"')
             self.end_headers()
             return
-        if self.path.split("?")[0] == "/api/stats":
+        path, _, query = self.path.partition("?")
+        q = dict(kv.split("=", 1) for kv in query.split("&") if "=" in kv)
+        if path in ("/api/stats", "/api/logs"):
             try:
                 conn = db.connect(self.server.target)
-                body, code = json.dumps(collect_stats(conn)).encode(), 200
+                if path == "/api/stats":
+                    data = collect_stats(conn, cfg=self.server.cfg)
+                else:
+                    data = collect_logs(conn, int(q.get("after", 0) or 0), 300, q.get("issues") == "1")
+                body, code = json.dumps(data).encode(), 200
                 conn.close()
             except Exception as e:  # keep the page alive if the DB is briefly unavailable
                 body, code = json.dumps({"error": str(e)}).encode(), 503
             ctype = "application/json"
-        elif self.path.split("?")[0] in ("/", "/index.html"):
+        elif path in ("/", "/index.html"):
             body, code, ctype = PAGE.encode(), 200, "text/html; charset=utf-8"
         else:
             body, code, ctype = b"not found", 404, "text/plain"
@@ -94,14 +126,15 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def make_server(target, host="127.0.0.1", port=8080):
+def make_server(target, host="127.0.0.1", port=8080, cfg=None):
     srv = ThreadingHTTPServer((host, port), Handler)
-    srv.target = target
+    srv.target, srv.cfg = target, cfg or {}
     return srv
 
 
 if __name__ == "__main__":
-    target = db_target(load_config(os.environ.get("CONFIG", "config.json")))
+    cfg = load_config(os.environ.get("CONFIG", "config.json"))
+    target = db_target(cfg)
     host, port = os.environ.get("HOST", "127.0.0.1"), int(os.environ.get("PORT", "8080"))
     print(f"dashboard on http://{host}:{port}" + ("  (password protected)" if os.environ.get("DASHBOARD_PASSWORD") else ""))
-    make_server(target, host, port).serve_forever()
+    make_server(target, host, port, cfg).serve_forever()

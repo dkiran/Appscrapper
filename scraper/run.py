@@ -81,6 +81,7 @@ class _Stop(Exception):
 def scrape(cfg, fetcher, sleep=time.sleep):
     """Never re-fetches a stored app and never repeats a finished search; never drops a scraped app
     (App Store / developer-country conditions only filter the contacts file)."""
+    log.info("run started (discovery=%s)", cfg.get("discovery", "ios"))
     conn = db.connect(db_target(cfg))
     known = db.known_packages(conn, cfg.get("refresh_after_days"))
     cap = cfg.get("max_new_apps_per_run") or float("inf")
