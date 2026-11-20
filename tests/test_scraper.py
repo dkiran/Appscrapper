@@ -234,3 +234,33 @@ def test_bundle_id_beats_name_matching():
     from scraper.ios import best_match
     cand = {"bundleId": "com.Acme.App", "trackName": "Totally Different", "sellerName": "Someone"}
     assert best_match("X", "Y", "", [cand], bundle_id="com.acme.app")[1] == "bundle-id"
+
+
+def test_resolve_ios_only_by_name(tmp_path):
+    from scraper import db
+    from scraper.run import db_target
+    cfg = CFG(tmp_path); cfg.update(discovery="ios", search_terms=[], countries=[], resolve_per_run=10)
+    conn = db.connect(db_target(cfg))
+    for pkg, name, site in [("net.zed.Only", "Only", "https://www.zed.io"), ("com.q.Nope", "Nope", "https://q.io")]:
+        db.upsert(conn, {"package": pkg, "app": name, "company": "Zed Ltd", "website": site, "url": "",
+                         "ios_url": f"https://apps.apple.com/app/{name}", "ios_match": "ios-only",
+                         "crawl_region": "us", "fetched_at": db.now()})
+
+    class R(Fake):
+        searches = 0
+        def search(self, t, c, l, n):
+            R.searches += 1
+            return [{"appId": "com.zed.android", "title": "Only", "developer": "Zed"}] if t == "Only" else \
+                   [{"appId": "com.other", "title": "Something Else", "developer": "X"}]
+        def details(self, p, c, l):
+            self.detail_calls += 1
+            return {"title": "Only", "developer": "Zed Ltd", "developerWebsite": "https://zed.io",
+                    "developerEmail": "hi@zed.io", "developerEmails": [], "developerAddress": "Dubai, UAE"}
+    f = R()
+    r = scrape(cfg, f, sleep=lambda s: None)
+    rows = {x["package"]: x for x in conn.execute("SELECT * FROM apps").fetchall()}
+    assert "net.zed.Only" not in rows and rows["com.zed.android"]["ios_match"] == "name-match"
+    assert rows["com.zed.android"]["both_stores"] == "Yes" and rows["com.zed.android"]["support_email"] == "hi@zed.io"
+    assert rows["com.q.Nope"]["ios_match"] == "no-android-found" and rows["com.q.Nope"]["both_stores"] == "No"
+    scrape(cfg, f, sleep=lambda s: None)
+    assert R.searches == 2  # each app searched once only

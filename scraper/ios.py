@@ -53,3 +53,9 @@ def best_match(title, developer, website, candidates, bundle_id=None):
         if score > best[2]:
             best = (c, why, score)
     return best[0], best[1]
+
+
+def similar(a, b):
+    """0..1 similarity of two app/company names after dropping legal suffixes and punctuation."""
+    a, b = _norm(a), _norm(b)
+    return SequenceMatcher(None, a, b).ratio() if a and b else 0.0

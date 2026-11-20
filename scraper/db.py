@@ -158,6 +158,23 @@ def set_ios(conn, package, url, match):
     conn.commit()
 
 
+def pending_resolve(conn, limit):
+    """App Store apps with no same-ID Android app, those with a website first (best for confirming a match)."""
+    return conn.execute("SELECT package, app, company, website, ios_url, crawl_region FROM apps "
+                        "WHERE ios_match = 'ios-only' ORDER BY CASE WHEN COALESCE(website,'') <> '' THEN 0 ELSE 1 END, "
+                        "fetched_at LIMIT ?", (limit,)).fetchall()
+
+
+def set_match(conn, package, match):
+    conn.execute("UPDATE apps SET ios_match=? WHERE package=?", (match, package))
+    conn.commit()
+
+
+def delete_app(conn, package):
+    conn.execute("DELETE FROM apps WHERE package=?", (package,))
+    conn.commit()
+
+
 def refresh_contacts(conn, require_ios=False, countries=None):
     """Rebuild the `contacts` table: one row per company + support email, so a campaign doesn't mail
     the same person once per app."""

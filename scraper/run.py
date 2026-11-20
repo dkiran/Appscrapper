@@ -10,7 +10,7 @@ import pycountry
 from . import db
 from google_play_scraper.exceptions import NotFoundError
 
-from .ios import best_match, clean_url
+from .ios import best_match, clean_url, similar
 from .categories import category_terms
 from .country import country_from_address
 
@@ -85,7 +85,7 @@ def scrape(cfg, fetcher, sleep=time.sleep):
     known = db.known_packages(conn, cfg.get("refresh_after_days"))
     cap = cfg.get("max_new_apps_per_run") or float("inf")
     deadline = time.monotonic() + 60 * cfg["max_runtime_minutes"] if cfg.get("max_runtime_minutes") else None
-    stats = {"saved": 0}
+    stats = {"saved": 0, "resolved": 0}
     failed = streak = 0
     limit = cfg.get("max_consecutive_failures") or float("inf")
     raw_sleep = sleep
@@ -118,6 +118,8 @@ def scrape(cfg, fetcher, sleep=time.sleep):
     countries = resolve_countries(cfg.get("countries"))
     mode = cfg.get("discovery", "ios")  # "ios" (App Store first), "play" (Google Play first) or "both"
     try:
+        if cfg.get("resolve_ios_only", True) and mode in ("ios", "both"):
+            _resolve_ios_only(cfg, fetcher, conn, known, sleep, fail, ok, stats)
         if mode in ("ios", "both"):
             ios_todo = due_searches(conn, countries, ["ios:" + t for t in terms], cfg.get("search_repeat_days"))
             log.info("iOS-first: %d searches due (%d terms x %d countries)", len(ios_todo), len(terms), len(countries))
@@ -134,7 +136,7 @@ def scrape(cfg, fetcher, sleep=time.sleep):
         db.export_csv(conn, cfg["csv_path"])
         db.export_contacts(conn, cfg.get("contacts_path", "data/contacts.csv"))
     log.info("contacts table: %d unique companies/emails", contacts)
-    log.info("run done: saved=%d failed=%d total_apps=%d", stats["saved"], failed, total)
+    log.info("run done: saved=%d resolved=%d failed=%d total_apps=%d", stats["saved"], stats["resolved"], failed, total)
     conn.close()
     return {"saved": stats["saved"], "failed": failed, "total": total}
 
@@ -192,6 +194,49 @@ def _run_searches(cfg, fetcher, conn, todo, known, cap, deadline, sleep, fail, o
             db.mark_search_done(conn, term, country)
         if cfg.get("export_csv"):
             db.export_csv(conn, cfg["csv_path"])
+
+
+def _resolve_ios_only(cfg, fetcher, conn, known, sleep, fail, ok, stats):
+    """For App Store apps with no same-ID Android app: search Google Play by name and accept a result only
+    if the website matches, or the name and developer both match closely. Result is recorded either way."""
+    limit = cfg.get("resolve_per_run", 250)
+    rows = db.pending_resolve(conn, limit)
+    if rows:
+        log.info("resolving %d App Store-only apps by name ...", len(rows))
+    for r in rows:
+        region = r["crawl_region"] or "us"
+        try:
+            hits = fetcher.search(r["app"], region, cfg["lang"], 5)
+            sleep(cfg["delay_seconds"])
+            cands = sorted((h for h in hits if h.get("appId") and similar(r["app"], h.get("title")) >= 0.75),
+                           key=lambda h: -similar(r["app"], h.get("title")))[:2]
+            ios_rec = {"trackName": r["app"], "sellerName": r["company"], "sellerUrl": r["website"],
+                       "trackViewUrl": r["ios_url"]}
+            found = None
+            for h in cands:
+                d = fetcher.details(h["appId"], region, cfg["lang"])
+                sleep(cfg["delay_seconds"])
+                m, _ = best_match(d.get("title"), d.get("developer"), d.get("developerWebsite"), [ios_rec])
+                if m:
+                    found = (h["appId"], d)
+                    break
+            ok()
+        except Exception as e:
+            log.warning("  resolve failed for %r: %s", r["app"], e)
+            fail()
+            continue
+        if found:
+            pkg, d = found
+            row = to_row(pkg, d, region)
+            row["ios_url"], row["ios_match"] = clean_url(r["ios_url"]), "name-match"
+            db.upsert(conn, row)
+            if pkg != r["package"]:
+                db.delete_app(conn, r["package"])
+            known.add(pkg)
+            stats["resolved"] += 1
+            log.info("  MATCH %s -> Android %s", r["app"], pkg)
+        else:
+            db.set_match(conn, r["package"], "no-android-found")
 
 
 def _ios_only_row(r, region):

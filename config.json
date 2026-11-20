@@ -7,7 +7,7 @@
   "countries": "ALL",
   "lang": "en",
   "results_per_query": 30,
-  "max_new_apps_per_run": 1500,
+  "max_new_apps_per_run": 1000,
   "delay_seconds": 4,
   "categories": [
     "BUSINESS",
@@ -33,5 +33,7 @@
   "run_on_start": false,
   "database_url": null,
   "discovery": "ios",
-  "ios_results_per_query": 200
+  "ios_results_per_query": 200,
+  "resolve_ios_only": true,
+  "resolve_per_run": 250
 }

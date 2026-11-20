@@ -81,3 +81,7 @@ Back up with `docker compose exec db pg_dump -U scraper scraper > backup.sql`.
 - `"play"` = the earlier Google-Play-first method; `"both"` = iOS-first then Play-first.
 - Apps whose developer used a *different* ID on Android are not found by ID in this mode; Play-first mode still catches those by name/website matching. Use `"both"` for the widest coverage.
 - Searches use the same terms/categories and countries as before; pacing is `ios_delay_seconds` after each App Store search and `delay_seconds` after each Play check.
+
+## Resolving "ios-only" apps (different Android ID)
+At the start of each run (iOS-first mode), up to `resolve_per_run` (default 250) apps marked `ios-only` are looked up on Google Play by name. A result is accepted only if its developer website matches the App Store seller's site (and the name is similar), or both name and developer name match closely. A match updates the row to the Android app (`iOS match: name-match`, `Both Stores: Yes`, Play emails filled in); otherwise the row becomes `no-android-found` and is never searched again. Apps with a website are tried first. Turn off with `"resolve_ios_only": false`.
+Budget: `max_new_apps_per_run` (1000) plus `resolve_per_run` (250) is roughly 1,500 Google requests a day; keep the total near that.
