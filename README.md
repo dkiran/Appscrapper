@@ -91,3 +91,6 @@ A read-only page showing totals (total apps, iOS apps, Android apps, both stores
 - Local: `python dashboard.py`, then open http://127.0.0.1:8080 (uses `DATABASE_URL` if set, otherwise the SQLite file from `config.json`).
 - Server: `docker compose up -d --build` also starts it on the server's port 8080 (localhost only). View it from your laptop with `ssh -L 8080:localhost:8080 user@server` then http://localhost:8080. Set `DASHBOARD_PASSWORD` in `.env` to require a password (any username). If you expose it publicly, put it behind HTTPS (e.g. Caddy or nginx) because the password is sent as HTTP Basic auth.
 - "Saved per day" uses the date each record was last saved (UTC), so a record updated later (for example resolved to its Android app) moves to the newer day.
+
+## AWS free tier / small instance (t3.micro, 1 GB RAM)
+Postgres is tuned small in `docker-compose.yml` and container logs are capped at 3 x 10 MB. Add 2 GB of swap, keep the disk at 30 GB or less, set the instance's CPU credit option to **Standard** (not Unlimited, which can bill extra), do not use EBS snapshots (they are not free beyond a small allowance; use `pg_dump` and copy it off instead), and set an AWS Budget alert so any charge is noticed.

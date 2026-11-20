@@ -2,6 +2,10 @@ services:
   db:
     image: postgres:16
     restart: unless-stopped
+    command: ["postgres", "-c", "shared_buffers=64MB", "-c", "max_connections=20", "-c", "work_mem=4MB"]  # small-instance friendly
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }   # keep container logs from filling a small disk
     environment:
       POSTGRES_USER: scraper
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
@@ -16,6 +20,9 @@ services:
   scraper:
     build: .
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }   # keep container logs from filling a small disk
     depends_on:
       db: { condition: service_healthy }
     environment:
@@ -27,6 +34,9 @@ services:
   dashboard:
     build: .
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }   # keep container logs from filling a small disk
     command: ["python", "dashboard.py"]
     depends_on:
       db: { condition: service_healthy }
