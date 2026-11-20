@@ -1,5 +1,6 @@
 import json
 import logging
+import random
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -65,6 +66,10 @@ def due_searches(conn, countries, terms, repeat_days):
     return [(c, t) for _, c, t in todo]
 
 
+class _Stop(Exception):
+    pass
+
+
 def scrape(cfg, fetcher, sleep=time.sleep):
     """Never re-fetches a stored app and never repeats a finished search; never drops a scraped app
     (App Store / developer-country conditions only filter the contacts file)."""
@@ -72,7 +77,26 @@ def scrape(cfg, fetcher, sleep=time.sleep):
     known = db.known_packages(conn, cfg.get("refresh_after_days"))
     budget = cfg.get("max_new_apps_per_run") or float("inf")
     deadline = time.monotonic() + 60 * cfg["max_runtime_minutes"] if cfg.get("max_runtime_minutes") else None
-    saved = failed = 0
+    stats = {"saved": 0}
+    failed = streak = 0
+    limit = cfg.get("max_consecutive_failures") or float("inf")
+    raw_sleep = sleep
+
+    def sleep(sec):  # randomised so requests don't arrive at a perfectly regular rhythm
+        raw_sleep(sec * random.uniform(0.7, 1.5))
+
+    def fail():
+        nonlocal failed, streak
+        failed += 1
+        streak += 1
+        if streak >= limit:
+            log.warning("%d failures in a row - stopping this run (possible block). Next run continues.", streak)
+            raise _Stop()
+
+    def ok():
+        nonlocal streak
+        streak = 0
+
     terms = list(cfg.get("search_terms") or []) + category_terms(cfg.get("categories"))
 
     if cfg.get("check_ios"):  # finish App Store checks that never ran or failed earlier
@@ -85,6 +109,20 @@ def scrape(cfg, fetcher, sleep=time.sleep):
     countries = resolve_countries(cfg.get("countries"))
     todo = due_searches(conn, countries, terms, cfg.get("search_repeat_days"))
     log.info("%d searches due (%d categories/terms x %d countries)", len(todo), len(terms), len(countries))
+    try:
+        _run_searches(cfg, fetcher, conn, todo, known, budget, deadline, sleep, fail, ok, stats)
+    except _Stop:
+        pass
+    total = db.export_csv(conn, cfg["csv_path"])
+    contacts = db.export_contacts(conn, cfg.get("contacts_path", "data/contacts.csv"),
+                                  cfg.get("require_ios", False), cfg.get("developer_countries"))
+    log.info("contacts file: %d unique companies/emails", contacts)
+    log.info("run done: saved=%d failed=%d total_in_csv=%d", stats["saved"], failed, total)
+    conn.close()
+    return {"saved": stats["saved"], "failed": failed, "total": total}
+
+
+def _run_searches(cfg, fetcher, conn, todo, known, budget, deadline, sleep, fail, ok, stats):
     for country, term in todo:
         if budget <= 0:
             log.info("per-run limit reached; the rest continues next run")
@@ -98,11 +136,12 @@ def scrape(cfg, fetcher, sleep=time.sleep):
         except Exception as e:
             log.warning("search failed term=%r country=%s: %s", term, country, e)
             db.search_failed(conn, term, country)
-            failed += 1
+            fail()
             sleep(cfg["delay_seconds"])
             continue
         log.info("  %d results", len(hits))
         search_failed = False
+        ok()
         complete = True
         for h in hits:
             pkg = h.get("appId")
@@ -119,26 +158,20 @@ def scrape(cfg, fetcher, sleep=time.sleep):
                         cfg, fetcher, sleep, row["app"], row["company"], row["website"], country)
                 db.upsert(conn, row)
                 known.add(pkg)
-                saved += 1
+                stats["saved"] += 1
                 budget -= 1
+                ok()
                 log.info("  saved %s (%s) email=%s dev_email=%s ios=%s", pkg, d.get("title"),
                          d.get("developerEmail") or "-", ", ".join(d.get("developerEmails") or []) or "-",
                          row.get("ios_match", "-"))
             except Exception as e:
                 log.warning("details failed %s: %s", pkg, e)
-                failed += 1
                 search_failed = True
+                fail()
             sleep(cfg["delay_seconds"])
         if complete and not search_failed:
             db.mark_search_done(conn, term, country)
         db.export_csv(conn, cfg["csv_path"])
-    total = db.export_csv(conn, cfg["csv_path"])
-    contacts = db.export_contacts(conn, cfg.get("contacts_path", "data/contacts.csv"),
-                                  cfg.get("require_ios", False), cfg.get("developer_countries"))
-    log.info("contacts file: %d unique companies/emails", contacts)
-    log.info("run done: saved=%d failed=%d total_in_csv=%d", saved, failed, total)
-    conn.close()
-    return {"saved": saved, "failed": failed, "total": total}
 
 
 def load_config(path):

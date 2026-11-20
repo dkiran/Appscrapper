@@ -7,16 +7,17 @@
   "countries": "ALL",
   "lang": "en",
   "results_per_query": 30,
-  "max_new_apps_per_run": null,
-  "delay_seconds": 1.5,
+  "max_new_apps_per_run": 1500,
+  "delay_seconds": 4,
   "categories": "ALL",
   "developer_countries": [],
   "check_ios": true,
   "require_ios": false,
-  "ios_delay_seconds": 3,
+  "ios_delay_seconds": 4,
   "contacts_path": "data/contacts.csv",
   "refresh_after_days": null,
   "ios_recheck_per_run": 50,
   "max_runtime_minutes": 600,
-  "search_repeat_days": 30
+  "search_repeat_days": 30,
+  "max_consecutive_failures": 10
 }

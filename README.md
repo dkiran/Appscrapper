@@ -45,3 +45,6 @@ Both CSVs end with `Play Store URL`/`App Store URL` (blank when the app isn't on
 
 ## Daily full coverage
 Defaults: `"categories": "ALL"` (all 49 categories), `"countries": "ALL"` (every ISO country code; ones Play doesn't serve fail 3 times and are then skipped until the repeat window), no per-run app limit, and a 10-hour time cap (`max_runtime_minutes`). Each daily run does the due searches in order and stops at the time cap; the next run continues. A finished search comes due again after `search_repeat_days` (30) to pick up new apps, but apps already stored are never fetched again. Expect the first full pass (about 49 x 249 searches plus every app and App Store lookup) to take many days; lower `countries` to a list like `["us","gb","in"]` for a faster start.
+
+## Staying under the radar
+Delays are randomised (about 0.7x to 1.5x of `delay_seconds`, default 4s), a run is capped at `max_new_apps_per_run` (1500) and `max_runtime_minutes`, and it stops itself after `max_consecutive_failures` (10) failed requests in a row, e.g. a 429 block, then continues on the next scheduled run. Raise volume gradually only if runs finish without failures.
