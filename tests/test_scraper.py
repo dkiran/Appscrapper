@@ -17,7 +17,7 @@ def clean_pg():
     yield
 
 
-CFG = lambda tmp: {"database_url": PG, "export_csv": True, "db_path": str(tmp / "a.db"), "csv_path": str(tmp / "a.csv"),
+CFG = lambda tmp: {"discovery": "play", "database_url": PG, "export_csv": True, "db_path": str(tmp / "a.db"), "csv_path": str(tmp / "a.csv"),
                    "search_terms": ["x"], "countries": ["us"], "lang": "en",
                    "results_per_query": 5, "max_new_apps_per_run": 10,
                    "delay_seconds": 0, "refresh_after_days": 30,
@@ -190,3 +190,47 @@ def test_every_search_is_paced(tmp_path):
     cfg = CFG(tmp_path); cfg.update(search_terms=["a", "b", "c"], countries=["us"], delay_seconds=4)
     scrape(cfg, AllKnown(), sleep=delays.append)
     assert len(delays) == 3 and all(d > 0 for d in delays)
+
+
+class IosFake:
+    """App Store returns 3 apps: one on both stores (same ID), one iOS-only, one whose Play check fails."""
+    def __init__(self): self.play_calls = []; self.ios_searches = 0; self.broken = True
+    def ios_search(self, term, country, limit):
+        self.ios_searches += 1
+        return [{"bundleId": "com.both", "trackName": "Both", "trackViewUrl": "https://apps.apple.com/app/id1?uo=4",
+                 "sellerName": "Acme"},
+                {"bundleId": "com.ios.only", "trackName": "Only", "trackViewUrl": "https://apps.apple.com/app/id2?uo=4",
+                 "sellerName": "Zed", "sellerUrl": "https://zed.io", "primaryGenreName": "Finance"},
+                {"bundleId": "com.flaky", "trackName": "Flaky", "trackViewUrl": "https://apps.apple.com/app/id3",
+                 "sellerName": "Fl"}]
+    def details(self, p, c, l):
+        from google_play_scraper.exceptions import NotFoundError
+        self.play_calls.append(p)
+        if p == "com.ios.only": raise NotFoundError("404")
+        if p == "com.flaky" and self.broken: raise RuntimeError("429")
+        return {"title": p, "developer": "Acme", "developerEmail": "s@acme.io", "developerEmails": ["d@acme.io"],
+                "developerAddress": "Pune, India", "url": f"https://play.google.com/store/apps/details?id={p}"}
+
+
+def test_ios_first_discovery(tmp_path):
+    cfg = CFG(tmp_path); cfg.update(discovery="ios", search_terms=["Business"], countries=["us"], check_ios=True)
+    f = IosFake()
+    r = scrape(cfg, f, sleep=lambda s: None)
+    assert r["saved"] == 2 and r["failed"] == 1
+    rows = {x["App"]: x for x in csv.DictReader(open(tmp_path / "a.csv"))}
+    assert rows["com.both"]["Both Stores"] == "Yes" and rows["com.both"]["iOS match"] == "bundle-id"
+    assert rows["com.both"]["App Store URL"] == "https://apps.apple.com/app/id1"  # tracking query removed
+    o = rows["Only"]
+    assert o["Both Stores"] == "No" and o["Play Store URL"] == "" and o["iOS match"] == "ios-only" and o["Website"] == "https://zed.io"
+    # flaky Play check -> not stored, search not marked done, so it is retried; stored apps are not re-checked
+    f.broken = False; f.play_calls.clear()
+    r2 = scrape(cfg, f, sleep=lambda s: None)
+    assert f.play_calls == ["com.flaky"] and r2["saved"] == 1 and f.ios_searches == 2
+    r3 = scrape(cfg, f, sleep=lambda s: None)
+    assert f.ios_searches == 2 and r3["saved"] == 0  # search finished: nothing repeated
+
+
+def test_bundle_id_beats_name_matching():
+    from scraper.ios import best_match
+    cand = {"bundleId": "com.Acme.App", "trackName": "Totally Different", "sellerName": "Someone"}
+    assert best_match("X", "Y", "", [cand], bundle_id="com.acme.app")[1] == "bundle-id"

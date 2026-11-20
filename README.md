@@ -75,3 +75,9 @@ CSV when needed: `docker compose exec scraper python main.py --export` writes `d
 Move an existing local SQLite file into Postgres: `docker compose cp data/apps.db scraper:/tmp/apps.db && docker compose exec scraper python main.py --import-sqlite /tmp/apps.db`.
 
 Back up with `docker compose exec db pg_dump -U scraper scraper > backup.sql`.
+
+## iOS-first discovery (default)
+`"discovery": "ios"` starts from the App Store, which has an official public search API returning up to 200 apps per request with bundle ID, seller name and website. For each new app it opens the Google Play page directly by that bundle ID (many developers reuse the same ID on Android), so one request confirms both stores. Found on Play = `Both Stores: Yes`, `iOS match: bundle-id`, with the support/developer emails from the Play page. Not on Play under that ID = stored as `ios-only` (no emails; use it for the App Store only list, or match it by name later). Nothing is dropped, nothing is re-checked.
+- `"play"` = the earlier Google-Play-first method; `"both"` = iOS-first then Play-first.
+- Apps whose developer used a *different* ID on Android are not found by ID in this mode; Play-first mode still catches those by name/website matching. Use `"both"` for the widest coverage.
+- Searches use the same terms/categories and countries as before; pacing is `ios_delay_seconds` after each App Store search and `delay_seconds` after each Play check.

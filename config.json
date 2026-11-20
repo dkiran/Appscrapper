@@ -31,5 +31,7 @@
   "max_consecutive_failures": 10,
   "export_csv": false,
   "run_on_start": false,
-  "database_url": null
+  "database_url": null,
+  "discovery": "ios",
+  "ios_results_per_query": 200
 }

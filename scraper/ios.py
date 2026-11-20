@@ -26,11 +26,18 @@ def _root(domain):
     return ".".join(parts[-2:])
 
 
-def best_match(title, developer, website, candidates):
-    """candidates: iTunes result dicts. Returns (candidate, reason) or (None, '')."""
+def clean_url(url):
+    """App Store links without tracking query strings, so the same app always compares equal."""
+    return (url or "").split("?")[0]
+
+
+def best_match(title, developer, website, candidates, bundle_id=None):
+    """candidates: iTunes result dicts; bundle_id: the Play package name. Returns (candidate, reason) or (None, '')."""
     t, dev, site = _norm(title), _norm(developer), _root(_domain(website))
     best = (None, "", 0)
     for c in candidates or []:
+        if bundle_id and (c.get("bundleId") or "").lower() == bundle_id.lower():
+            return c, "bundle-id"  # same ID on both stores: certain
         ct = _norm(c.get("trackName"))
         cdev = _norm(c.get("sellerName") or c.get("artistName"))
         csite = _root(_domain(c.get("sellerUrl")))

@@ -69,6 +69,12 @@ class PlayFetcher:
         with urllib.request.urlopen(f"https://itunes.apple.com/search?{q}", timeout=20) as r:
             return json.loads(r.read().decode("utf-8")).get("results", [])
 
+    def ios_search(self, term, country, limit=200):
+        """iTunes Search API: up to 200 apps per request, each with bundleId, sellerName, sellerUrl, trackViewUrl."""
+        q = urllib.parse.urlencode({"term": term, "entity": "software", "country": country, "limit": limit})
+        with urllib.request.urlopen(f"https://itunes.apple.com/search?{q}", timeout=30) as r:
+            return json.loads(r.read().decode("utf-8")).get("results", [])
+
     def inspect(self, package, country="us", lang="en"):
         """Debug: every bare-email string on the page with its location in the data."""
         dom = get(Formats.Detail.build(app_id=package, lang=lang, country=country))
