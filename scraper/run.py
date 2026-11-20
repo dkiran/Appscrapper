@@ -37,6 +37,7 @@ def scrape(cfg, fetcher, sleep=time.sleep):
         for term in cfg["search_terms"]:
             if budget <= 0:
                 break
+            log.info("searching %r in %s ...", term, country)
             try:
                 hits = fetcher.search(term, country, cfg["lang"], cfg["results_per_query"])
             except Exception as e:  # network/blocking: log and move on
@@ -44,6 +45,7 @@ def scrape(cfg, fetcher, sleep=time.sleep):
                 failed += 1
                 sleep(cfg["delay_seconds"])
                 continue
+            log.info("  %d results", len(hits))
             for h in hits:
                 pkg = h.get("appId")
                 if not pkg or pkg in fresh or pkg in seen:
@@ -56,10 +58,13 @@ def scrape(cfg, fetcher, sleep=time.sleep):
                     db.upsert(conn, to_row(pkg, d, country))
                     saved += 1
                     budget -= 1
+                    log.info("  saved %s (%s) email=%s dev_email=%s", pkg, d.get("title"),
+                             d.get("developerEmail") or "-", ", ".join(d.get("developerEmails") or []) or "-")
                 except Exception as e:
                     log.warning("details failed %s: %s", pkg, e)
                     failed += 1
                 sleep(cfg["delay_seconds"])
+            db.export_csv(conn, cfg["csv_path"])  # keep the CSV current after every search
     total = db.export_csv(conn, cfg["csv_path"])
     log.info("run done: saved=%d failed=%d total_in_csv=%d", saved, failed, total)
     conn.close()
