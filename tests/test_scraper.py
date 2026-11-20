@@ -264,3 +264,30 @@ def test_resolve_ios_only_by_name(tmp_path):
     assert rows["com.q.Nope"]["ios_match"] == "no-android-found" and rows["com.q.Nope"]["both_stores"] == "No"
     scrape(cfg, f, sleep=lambda s: None)
     assert R.searches == 2  # each app searched once only
+
+
+def test_dashboard_stats_and_server(tmp_path, monkeypatch):
+    import json, threading, urllib.request, urllib.error, base64
+    from datetime import date
+    import dashboard
+    from scraper import db
+    from scraper.run import db_target
+    cfg = CFG(tmp_path)
+    scrape(cfg, Fake(), sleep=lambda s: None)
+    conn = db.connect(db_target(cfg))
+    s = dashboard.collect_stats(conn)
+    assert s["total"] == 1 and s["today"] == 1 and len(s["days"]) == 30 and s["days"][-1]["day"] == date.today().isoformat()
+    assert s["app_store_only"] == 0 and s["play_only"] == 1 and s["with_email"] == 1 and s["companies"] == 1
+    conn.close()
+    srv = dashboard.make_server(db_target(cfg), "127.0.0.1", 0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    assert json.load(urllib.request.urlopen(base + "/api/stats"))["total"] == 1
+    assert b"Scraper monitor" in urllib.request.urlopen(base + "/").read()
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "pw")
+    with pytest.raises(urllib.error.HTTPError) as e:
+        urllib.request.urlopen(base + "/api/stats")
+    assert e.value.code == 401
+    req = urllib.request.Request(base + "/api/stats", headers={"Authorization": "Basic " + base64.b64encode(b"u:pw").decode()})
+    assert json.load(urllib.request.urlopen(req))["total"] == 1
+    srv.shutdown()

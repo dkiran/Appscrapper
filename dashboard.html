@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scraper Monitor</title>
+<style>
+:root{color-scheme:light;--surface:#fcfcfb;--page:#f4f4f2;--ink:#0b0b0b;--ink2:#52514e;--muted:#7a7873;--line:#e4e3df;--series:#2a78d6}
+@media (prefers-color-scheme:dark){:root:where(:not([data-theme="light"])){color-scheme:dark;--surface:#1a1a19;--page:#121211;--ink:#f0efec;--ink2:#c3c2b7;--muted:#8f8e86;--line:#2f2f2d;--series:#3987e5}}
+:root[data-theme="dark"]{color-scheme:dark;--surface:#1a1a19;--page:#121211;--ink:#f0efec;--ink2:#c3c2b7;--muted:#8f8e86;--line:#2f2f2d;--series:#3987e5}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:980px;margin:0 auto;padding:24px 16px 48px}
+header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+h1{font-size:20px;margin:0}
+.sub{color:var(--ink2);font-size:13px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.tile .v{font-size:28px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.tile .l{color:var(--ink2);font-size:13px;margin-top:2px}
+.tile.hero{grid-column:span 2}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px}
+.card h2{font-size:15px;margin:0 0 2px}
+.card .sub{margin-bottom:14px}
+.chart{position:relative;height:200px;display:flex;align-items:flex-end;gap:3px;border-bottom:1px solid var(--line);padding-top:22px}
+.col{flex:1 1 0;height:100%;display:flex;align-items:flex-end;justify-content:center;position:relative;cursor:default}
+.bar{width:100%;max-width:24px;background:var(--series);border-radius:4px 4px 0 0;min-height:0}
+.col:hover .bar,.col:focus .bar{filter:brightness(1.12)}
+.col.zero .bar{height:2px!important;background:var(--line)}
+.tip{position:absolute;z-index:2;pointer-events:none;background:var(--ink);color:var(--surface);padding:6px 9px;border-radius:6px;font-size:12px;white-space:nowrap;opacity:0;transform:translate(-50%,-6px);transition:opacity .08s}
+.axis{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;margin-top:6px}
+.peak{position:absolute;left:0;top:0;color:var(--muted);font-size:12px}
+.last{position:absolute;top:0;right:0;color:var(--ink2);font-size:12px}
+.toggle{background:none;border:1px solid var(--line);color:var(--ink2);border-radius:6px;padding:4px 10px;font:inherit;font-size:13px;cursor:pointer;margin-top:12px}
+table{width:100%;border-collapse:collapse;margin-top:12px;font-size:14px;font-variant-numeric:tabular-nums}
+th,td{text-align:right;padding:6px 8px;border-bottom:1px solid var(--line)}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--ink2);font-weight:500}
+.err{color:#e34948;margin:8px 0}
+@media (max-width:520px){.tile.hero{grid-column:span 1}.tile .v{font-size:24px}}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Scraper monitor</h1>
+    <div class="sub" id="status">Loading…</div>
+  </header>
+  <div id="err" class="err" hidden></div>
+  <section class="tiles" aria-label="Totals">
+    <div class="tile hero"><div class="v" id="total">–</div><div class="l">apps collected so far</div></div>
+    <div class="tile"><div class="v" id="today">–</div><div class="l">saved today</div></div>
+    <div class="tile"><div class="v" id="both">–</div><div class="l">on both stores</div></div>
+    <div class="tile"><div class="v" id="aso">–</div><div class="l">App Store only</div></div>
+    <div class="tile"><div class="v" id="po">–</div><div class="l">Google Play only</div></div>
+    <div class="tile"><div class="v" id="unres">–</div><div class="l">App Store apps not yet matched to Android</div></div>
+    <div class="tile"><div class="v" id="email">–</div><div class="l">with a support email</div></div>
+    <div class="tile"><div class="v" id="comp">–</div><div class="l">companies in contacts</div></div>
+    <div class="tile"><div class="v" id="srch">–</div><div class="l">searches finished</div></div>
+  </section>
+  <section class="card">
+    <h2>Records saved per day</h2>
+    <div class="sub">Last 30 days (UTC), by the date each record was last saved</div>
+    <div class="chart" id="chart" role="img" aria-label="Column chart of records saved per day, last 30 days"></div>
+    <div class="axis"><span id="d0"></span><span id="d1"></span></div>
+    <button class="toggle" id="toggle" aria-expanded="false">Show as table</button>
+    <div id="tablewrap" hidden></div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const fmt = n => Number(n).toLocaleString();
+const dayLabel = s => new Date(s + 'T00:00:00Z').toLocaleDateString(undefined, {month:'short', day:'numeric', timeZone:'UTC'});
+function render(s){
+  $('err').hidden = true;
+  $('total').textContent = fmt(s.total); $('today').textContent = fmt(s.today);
+  $('both').textContent = fmt(s.both); $('aso').textContent = fmt(s.app_store_only); $('po').textContent = fmt(s.play_only);
+  $('unres').textContent = fmt(s.unresolved); $('email').textContent = fmt(s.with_email);
+  $('comp').textContent = fmt(s.companies); $('srch').textContent = fmt(s.searches_done);
+  $('status').textContent = s.last_saved ? 'Last record saved ' + s.last_saved.replace('T',' ').replace(/\+00:00$/,' UTC') : 'No records yet';
+  const max = Math.max(1, ...s.days.map(d => d.saved)), chart = $('chart');
+  chart.innerHTML = '<span class="peak">' + fmt(max) + '</span><span class="last">' + fmt(s.days[s.days.length-1].saved) + ' today</span>';
+  s.days.forEach(d => {
+    const c = document.createElement('div'); c.className = 'col' + (d.saved ? '' : ' zero'); c.tabIndex = 0;
+    c.setAttribute('aria-label', dayLabel(d.day) + ': ' + d.saved + ' saved, ' + d.both + ' on both stores');
+    const b = document.createElement('div'); b.className = 'bar'; b.style.height = (d.saved / max * 100 * 0.88) + '%'; c.appendChild(b);
+    const t = document.createElement('div'); t.className = 'tip'; t.style.bottom = (d.saved / max * 88 + 4) + '%'; t.style.left = '50%';
+    t.textContent = dayLabel(d.day) + ' · ' + fmt(d.saved) + ' saved · ' + fmt(d.both) + ' both stores'; c.appendChild(t);
+    const on = () => t.style.opacity = 1, off = () => t.style.opacity = 0;
+    c.addEventListener('mouseenter', on); c.addEventListener('mouseleave', off); c.addEventListener('focus', on); c.addEventListener('blur', off);
+    chart.appendChild(c);
+  });
+  $('d0').textContent = dayLabel(s.days[0].day); $('d1').textContent = dayLabel(s.days[s.days.length-1].day);
+  const rows = s.days.slice().reverse().map(d => '<tr><td>' + d.day + '</td><td>' + fmt(d.saved) + '</td><td>' + fmt(d.both) + '</td></tr>').join('');
+  $('tablewrap').innerHTML = '<table><thead><tr><th>Day</th><th>Saved</th><th>On both stores</th></tr></thead><tbody>' + rows +
+    (s.older ? '<tr><td>Earlier</td><td>' + fmt(s.older) + '</td><td></td></tr>' : '') + '</tbody></table>';
+}
+$('toggle').onclick = () => { const w = $('tablewrap'); w.hidden = !w.hidden; $('toggle').textContent = w.hidden ? 'Show as table' : 'Hide table'; $('toggle').setAttribute('aria-expanded', String(!w.hidden)); };
+async function load(){
+  try { const r = await fetch('/api/stats', {cache:'no-store'}); const s = await r.json();
+    if (!r.ok) throw new Error(s.error || r.status); render(s);
+  } catch(e){ $('err').hidden = false; $('err').textContent = 'Could not load stats: ' + e.message; }
+}
+load(); setInterval(load, 30000);
+</script>
+</body>
+</html>

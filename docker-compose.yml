@@ -23,5 +23,21 @@ services:
     volumes:
       - ./config.json:/app/config.json:ro
       - ./data:/app/data            # only used by `--export`
+
+  dashboard:
+    build: .
+    restart: unless-stopped
+    command: ["python", "dashboard.py"]
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgresql://scraper:${POSTGRES_PASSWORD}@db:5432/scraper
+      HOST: 0.0.0.0
+      PORT: "8080"
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
+    volumes:
+      - ./config.json:/app/config.json:ro
+    ports: ["127.0.0.1:8080:8080"]   # the server itself only; use an SSH tunnel or a reverse proxy with HTTPS
+
 volumes:
   pgdata:

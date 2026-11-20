@@ -85,3 +85,9 @@ Back up with `docker compose exec db pg_dump -U scraper scraper > backup.sql`.
 ## Resolving "ios-only" apps (different Android ID)
 At the start of each run (iOS-first mode), up to `resolve_per_run` (default 250) apps marked `ios-only` are looked up on Google Play by name. A result is accepted only if its developer website matches the App Store seller's site (and the name is similar), or both name and developer name match closely. A match updates the row to the Android app (`iOS match: name-match`, `Both Stores: Yes`, Play emails filled in); otherwise the row becomes `no-android-found` and is never searched again. Apps with a website are tried first. Turn off with `"resolve_ios_only": false`.
 Budget: `max_new_apps_per_run` (1000) plus `resolve_per_run` (250) is roughly 1,500 Google requests a day; keep the total near that.
+
+## Monitor page
+A read-only page showing totals (collected, both stores, App Store only, Google Play only, with email, companies, searches finished) and records saved per day for the last 30 days, with a table view. It shows counts only, no emails.
+- Local: `python dashboard.py`, then open http://127.0.0.1:8080 (uses `DATABASE_URL` if set, otherwise the SQLite file from `config.json`).
+- Server: `docker compose up -d --build` also starts it on the server's port 8080 (localhost only). View it from your laptop with `ssh -L 8080:localhost:8080 user@server` then http://localhost:8080. Set `DASHBOARD_PASSWORD` in `.env` to require a password (any username). If you expose it publicly, put it behind HTTPS (e.g. Caddy or nginx) because the password is sent as HTTP Basic auth.
+- "Saved per day" uses the date each record was last saved (UTC), so a record updated later (for example resolved to its Android app) moves to the newer day.
