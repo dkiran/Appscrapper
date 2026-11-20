@@ -65,10 +65,32 @@ def connect(target):
         raw.row_factory = sqlite3.Row
         raw.execute("PRAGMA journal_mode=WAL")  # lets the dashboard read while the scraper writes
         conn = Conn(raw, False)
-    for stmt in SCHEMA[:3]:
-        conn.execute(stmt)
+    _ensure_schema(conn)
+    conn.commit()
+    return conn
+
+
+def _has_index(conn, name):
+    if conn.pg:
+        q = "SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = ?"
+    else:
+        q = "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?"
+    return conn.execute(q, (name,)).fetchone() is not None
+
+
+def _ensure_schema(conn):
+    """Create or migrate tables, doing work only when something is actually missing. Every statement that
+    takes a table lock (CREATE INDEX even with IF NOT EXISTS, ALTER, bulk UPDATE) is skipped when not needed,
+    and one connection at a time runs this, so many short-lived connections (dashboard requests, the log
+    writer) can't deadlock with the scraper's writes."""
+    if conn.pg:
+        conn.execute("SELECT pg_advisory_xact_lock(727272)")  # released at commit
     pk = "BIGSERIAL PRIMARY KEY" if conn.pg else "INTEGER PRIMARY KEY AUTOINCREMENT"
-    conn.execute(f"CREATE TABLE IF NOT EXISTS logs (id {pk}, ts TEXT, level TEXT, message TEXT)")
+    tables = {"apps": SCHEMA[0], "searches": SCHEMA[1], "contacts": SCHEMA[2],
+              "logs": f"CREATE TABLE IF NOT EXISTS logs (id {pk}, ts TEXT, level TEXT, message TEXT)"}
+    for name, ddl in tables.items():
+        if not conn.columns(name):
+            conn.execute(ddl)
     cols = conn.columns("apps")
     if "support_email" not in cols:  # very old DB: developer_email used to hold the support email
         conn.execute("ALTER TABLE apps ADD COLUMN support_email TEXT")
@@ -78,11 +100,11 @@ def connect(target):
             conn.execute(f"ALTER TABLE apps ADD COLUMN {col} {typ}")
     if "attempts" not in conn.columns("searches"):
         conn.execute("ALTER TABLE searches ADD COLUMN attempts INTEGER DEFAULT 0")
-    conn.execute("UPDATE apps SET both_stores = CASE WHEN COALESCE(url,'') <> '' AND COALESCE(ios_url,'') <> '' "
-                 "THEN 'Yes' ELSE 'No' END WHERE both_stores IS NULL")
-    conn.execute(SCHEMA[3])
-    conn.commit()
-    return conn
+    if conn.execute("SELECT 1 FROM apps WHERE both_stores IS NULL LIMIT 1").fetchone():
+        conn.execute("UPDATE apps SET both_stores = CASE WHEN COALESCE(url,'') <> '' AND COALESCE(ios_url,'') <> '' "
+                     "THEN 'Yes' ELSE 'No' END WHERE both_stores IS NULL")
+    if not _has_index(conn, "apps_both_idx"):
+        conn.execute(SCHEMA[3])
 
 
 def now():
