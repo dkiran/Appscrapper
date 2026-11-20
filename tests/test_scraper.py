@@ -5,11 +5,14 @@ from scraper.run import scrape
 CFG = lambda tmp: {"db_path": str(tmp / "a.db"), "csv_path": str(tmp / "a.csv"),
                    "search_terms": ["x"], "countries": ["us"], "lang": "en",
                    "results_per_query": 5, "max_new_apps_per_run": 10,
-                   "delay_seconds": 0, "refresh_after_days": 30}
+                   "delay_seconds": 0, "refresh_after_days": 30,
+                   "check_ios": False, "contacts_path": str(tmp / "c.csv")}
 
 
 class Fake:
+    ios = []
     def __init__(self): self.detail_calls = 0
+    def ios_lookup(self, t, c): return self.ios
     def search(self, t, c, l, n): return [{"appId": "com.a"}, {"appId": "com.b"}]
     def details(self, p, c, l):
         self.detail_calls += 1
@@ -32,7 +35,8 @@ def test_scrape_exports_columns_and_skips_fresh(tmp_path):
     assert r["saved"] == 1 and r["failed"] == 1
     rows = list(csv.DictReader(open(tmp_path / "a.csv")))
     assert list(rows[0]) == ["Email", "App", "Company", "Website", "Category",
-                             "Play Store URL", "Developer email", "Developer address", "Country"]
+                             "Play Store URL", "Developer email", "Developer address", "Country",
+                             "App Store URL", "iOS match"]
     assert rows[0]["Country"] == "Kenya" and rows[0]["Email"] == "support@acme.io"
     assert rows[0]["Developer email"] == "ceo@acme.io"
     calls = f.detail_calls
@@ -53,3 +57,19 @@ def test_categories_and_country_filter(tmp_path):
     assert scrape(cfg, Fake(), sleep=lambda s: None)["saved"] == 0  # Fake dev is in Kenya
     cfg["developer_countries"] = ["Kenya"]
     assert scrape(cfg, Fake(), sleep=lambda s: None)["saved"] == 1
+
+
+def test_ios_match_and_require(tmp_path):
+    from scraper.ios import best_match
+    cand = {"trackName": "A", "trackViewUrl": "https://apps.apple.com/app/id1", "sellerName": "Acme Ltd",
+            "sellerUrl": "https://www.acme.io/about"}
+    assert best_match("A", "Acme", "https://acme.io", [cand])[1] == "website+title"
+    assert best_match("A", "Other Co", "https://x.com", [cand])[0] is None
+    assert best_match("Alpha", "Acme", "https://acme.io", [cand])[0] is None
+    cfg = CFG(tmp_path); cfg.update(check_ios=True, require_ios=True, ios_delay_seconds=0)
+    assert scrape(cfg, Fake(), sleep=lambda s: None)["saved"] == 0
+    f = Fake(); f.ios = [cand]
+    assert scrape(cfg, f, sleep=lambda s: None)["saved"] == 1
+    rows = list(csv.DictReader(open(tmp_path / "a.csv")))
+    assert rows[0]["App Store URL"].startswith("https://apps.apple.com")
+    assert len(list(csv.DictReader(open(tmp_path / "c.csv")))) == 1

@@ -1,6 +1,8 @@
 """Thin wrapper over google-play-scraper so the rest of the code can be tested offline."""
 import json
 import re
+import urllib.parse
+import urllib.request
 
 from google_play_scraper import search as gp_search
 from google_play_scraper.constants.regex import Regex
@@ -60,6 +62,12 @@ class PlayFetcher:
             url = Formats.Detail.fallback_build(app_id=package, lang=lang)
             dom = get(url)
         return parse_page(dom, package, url)
+
+    def ios_lookup(self, title, country):
+        """Apple's public iTunes Search API (about 20 requests/minute allowed)."""
+        q = urllib.parse.urlencode({"term": title, "entity": "software", "country": country, "limit": 10})
+        with urllib.request.urlopen(f"https://itunes.apple.com/search?{q}", timeout=20) as r:
+            return json.loads(r.read().decode("utf-8")).get("results", [])
 
     def inspect(self, package, country="us", lang="en"):
         """Debug: every bare-email string on the page with its location in the data."""

@@ -3,6 +3,7 @@ import logging
 import time
 
 from . import db
+from .ios import best_match
 from .categories import category_terms
 from .country import country_from_address
 
@@ -63,6 +64,15 @@ def scrape(cfg, fetcher, sleep=time.sleep):
                         log.info("  skip %s (developer country %r)", pkg, row["country"] or "unknown")
                         sleep(cfg["delay_seconds"])
                         continue
+                    if cfg.get("check_ios"):
+                        hits_ios = fetcher.ios_lookup(row["app"], country)
+                        sleep(cfg.get("ios_delay_seconds", 3))
+                        m, why = best_match(row["app"], row["company"], row["website"], hits_ios)
+                        row["ios_url"] = m.get("trackViewUrl") if m else ""
+                        row["ios_match"] = why
+                        if cfg.get("require_ios") and not m:
+                            log.info("  skip %s (not found on App Store)", pkg)
+                            continue
                     db.upsert(conn, row)
                     saved += 1
                     budget -= 1
@@ -74,6 +84,8 @@ def scrape(cfg, fetcher, sleep=time.sleep):
                 sleep(cfg["delay_seconds"])
             db.export_csv(conn, cfg["csv_path"])  # keep the CSV current after every search
     total = db.export_csv(conn, cfg["csv_path"])
+    contacts = db.export_contacts(conn, cfg.get("contacts_path", "data/contacts.csv"), cfg.get("require_ios", False))
+    log.info("contacts file: %d unique companies/emails", contacts)
     log.info("run done: saved=%d failed=%d total_in_csv=%d", saved, failed, total)
     conn.close()
     return {"saved": saved, "failed": failed, "total": total}

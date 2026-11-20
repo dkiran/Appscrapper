@@ -30,3 +30,11 @@ System cron alternative: `0 2 * * * cd /path/playstore-scraper && python main.py
 - `"countries"`: Play Store regions searched (two-letter codes, e.g. `["us", "in", "ke"]`); results differ by region.
 - `"developer_countries"`: e.g. `["India", "Kenya"]` keeps only apps whose developer address ends in that country (empty = keep all).
 - Raise `max_new_apps_per_run` and `results_per_query` for wider coverage; search returns only a limited number of hits per term, so more terms = more apps.
+
+## Both stores + campaign list
+- `"check_ios": true` looks each app up in Apple's public iTunes Search API and fills `App Store URL` and `iOS match` (`website+title` or `title+developer`; weaker matches are rejected). `"require_ios": true` keeps only apps found on both stores. Lookups are throttled by `ios_delay_seconds` (Apple allows roughly 20 requests/minute).
+- `data/contacts.csv` has one row per company and support email (with its apps listed), so a campaign sends each company one email rather than one per app. Use this file for outreach, not `apps.csv`.
+- Matching is a best guess by name, developer and website; spot-check a sample before mailing.
+
+## Before you email anyone
+Cold B2B email is lawful in many places but regulated: include a real sender identity and postal address, a working unsubscribe link that you honour, and no misleading subject lines (CAN-SPAM). The EU/UK (GDPR/PECR), Canada (CASL) and India (DPDP) have stricter or different rules; prefer role addresses (support@, contact@) over personal ones, keep a suppression list, and get advice for the markets you target. Scraping Google Play also breaches its Terms of Service.
