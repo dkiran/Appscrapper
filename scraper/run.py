@@ -148,6 +148,7 @@ def _run_searches(cfg, fetcher, conn, todo, known, budget, deadline, sleep, fail
             sleep(cfg["delay_seconds"])
             continue
         log.info("  %d results", len(hits))
+        sleep(cfg["delay_seconds"])  # pace the searches too, even when every result is already stored
         search_failed = False
         ok()
         complete = True

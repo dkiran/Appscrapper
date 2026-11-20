@@ -180,3 +180,13 @@ def test_database_is_the_store_and_import(tmp_path):
     assert db.import_sqlite(str(old), conn) == 1
     assert conn.execute("SELECT COUNT(*) AS n FROM apps").fetchone()["n"] == 2
     assert db.export_csv(conn, str(tmp_path / "x.csv")) == 2
+
+
+def test_every_search_is_paced(tmp_path):
+    delays = []
+
+    class AllKnown(Fake):
+        def search(self, t, c, l, n): return []
+    cfg = CFG(tmp_path); cfg.update(search_terms=["a", "b", "c"], countries=["us"], delay_seconds=4)
+    scrape(cfg, AllKnown(), sleep=delays.append)
+    assert len(delays) == 3 and all(d > 0 for d in delays)
