@@ -36,7 +36,7 @@ def test_scrape_exports_columns_and_skips_fresh(tmp_path):
     rows = list(csv.DictReader(open(tmp_path / "a.csv")))
     assert list(rows[0]) == ["Email", "App", "Company", "Website", "Category",
                              "Play Store URL", "Developer email", "Developer address", "Country",
-                             "App Store URL", "iOS match"]
+                             "App Store URL", "iOS match", "Both Stores"]
     assert rows[0]["Country"] == "Kenya" and rows[0]["Email"] == "support@acme.io"
     assert rows[0]["Developer email"] == "ceo@acme.io"
     calls = f.detail_calls
@@ -64,7 +64,9 @@ def test_nothing_dropped_filters_only_contacts(tmp_path):
                                     developer_countries=["India"])
     r = scrape(cfg, Fake(), sleep=lambda s: None)
     assert r["saved"] == 1  # saved although no App Store match and developer is in Kenya
-    assert len(list(csv.DictReader(open(tmp_path / "a.csv")))) == 1 and _contacts(tmp_path) == []
+    rows = list(csv.DictReader(open(tmp_path / "a.csv")))
+    assert len(rows) == 1 and rows[0]["App Store URL"] == "" and rows[0]["Both Stores"] == "No"
+    assert _contacts(tmp_path) == []  # contacts filtered by require_ios / developer_countries
 
 
 def test_ios_match_and_require(tmp_path):
@@ -78,7 +80,9 @@ def test_ios_match_and_require(tmp_path):
     f = Fake(); f.ios = [cand]
     scrape(cfg, f, sleep=lambda s: None)
     rows = list(csv.DictReader(open(tmp_path / "a.csv")))
-    assert rows[0]["App Store URL"].startswith("https://apps.apple.com") and len(_contacts(tmp_path)) == 1
+    assert rows[0]["App Store URL"].startswith("https://apps.apple.com") and rows[0]["Both Stores"] == "Yes"
+    c = _contacts(tmp_path)
+    assert len(c) == 1 and c[0]["Both Stores"] == "Yes" and c[0]["App Store URL"].startswith("https://apps.apple.com")
 
 
 def test_no_repeat_and_ios_recheck(tmp_path):

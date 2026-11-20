@@ -21,7 +21,7 @@
   "categories": [],
   "developer_countries": [],
   "check_ios": true,
-  "require_ios": true,
+  "require_ios": false,
   "ios_delay_seconds": 3,
   "contacts_path": "data/contacts.csv",
   "refresh_after_days": null,

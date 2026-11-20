@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 CSV_COLUMNS = ["Email", "App", "Company", "Website", "Category",
                "Play Store URL", "Developer email", "Developer address", "Country",
-               "App Store URL", "iOS match"]
+               "App Store URL", "iOS match", "Both Stores"]
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS apps (
@@ -100,11 +100,11 @@ def export_csv(conn, path):
         for r in rows:
             # Email = App support email; Developer email = other emails found in developer/about text.
             w.writerow([r["support_email"], r["app"], r["company"], r["website"], r["category"],
-                        r["url"], r["developer_email"], r["developer_address"], r["country"], r["ios_url"] or "", r["ios_match"] or ""])
+                        r["url"], r["developer_email"], r["developer_address"], r["country"], r["ios_url"] or "", r["ios_match"] or "", "Yes" if (r["url"] and r["ios_url"]) else "No"])
     return len(rows)
 
 
-CONTACT_COLUMNS = ["Email", "Developer email", "Company", "Website", "Country", "Apps", "App count", "Sample Play Store URL", "Sample App Store URL"]
+CONTACT_COLUMNS = ["Email", "Developer email", "Company", "Website", "Country", "Apps", "App count", "Play Store URL", "App Store URL", "Both Stores"]
 
 
 def export_contacts(conn, path, require_ios=False, countries=None):
@@ -126,7 +126,10 @@ def export_contacts(conn, path, require_ios=False, countries=None):
         w = csv.writer(f)
         w.writerow(CONTACT_COLUMNS)
         for rows in groups.values():
-            r = rows[0]
+            both = [x for x in rows if x["url"] and x["ios_url"]]
+            r = both[0] if both else rows[0]  # prefer an app that is on both stores as the sample
+            ios = next((x["ios_url"] for x in rows if x["ios_url"]), "")
             w.writerow([r["support_email"], r["developer_email"], r["company"], r["website"], r["country"],
-                        "; ".join(x["app"] for x in rows[:10]), len(rows), r["url"], r["ios_url"] or ""])
+                        "; ".join(x["app"] for x in rows[:10]), len(rows), r["url"] or "", ios,
+                        "Yes" if both else "No"])
     return len(groups)
