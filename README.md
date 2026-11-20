@@ -94,3 +94,10 @@ A read-only page showing totals (total apps, iOS apps, Android apps, both stores
 
 ## AWS free tier / small instance (t3.micro, 1 GB RAM)
 Postgres is tuned small in `docker-compose.yml` and container logs are capped at 3 x 10 MB. Add 2 GB of swap, keep the disk at 30 GB or less, set the instance's CPU credit option to **Standard** (not Unlimited, which can bill extra), do not use EBS snapshots (they are not free beyond a small allowance; use `pg_dump` and copy it off instead), and set an AWS Budget alert so any charge is noticed.
+
+## Open the monitor page on a domain (HTTPS)
+1. Attach an Elastic IP to the instance and point a DNS `A` record (e.g. `leads.example.com`) at it. (No domain? `<ip-with-dashes>.sslip.io`, e.g. `54-252-252-6.sslip.io`, resolves to that IP without buying one.)
+2. In the EC2 security group allow inbound TCP 80 and 443 from anywhere (keep SSH limited to your IP).
+3. In `.env` set `DOMAIN=leads.example.com` (no `https://`) and a long random `DASHBOARD_PASSWORD`.
+4. `docker compose -f docker-compose.yml -f docker-compose.https.yml up -d` - Caddy fetches and renews the Let's Encrypt certificate automatically.
+The login uses HTTP Basic auth over HTTPS, wrong attempts are delayed by 1 s, and the page shows counts and log lines only (no email addresses). Log lines include app and company names.

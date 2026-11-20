@@ -7,6 +7,7 @@ import base64
 import hmac
 import json
 import os
+import time
 from datetime import date, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -96,6 +97,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if not self._authorised():
+            if self.headers.get("Authorization"):
+                time.sleep(1)  # slow down password guessing
             self.send_response(401)
             self.send_header("WWW-Authenticate", 'Basic realm="scraper"')
             self.end_headers()

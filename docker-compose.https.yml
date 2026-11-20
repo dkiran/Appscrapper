@@ -1,0 +1,25 @@
+# Public HTTPS access to the monitor page. Use together with the main file:
+#   docker compose -f docker-compose.yml -f docker-compose.https.yml up -d
+services:
+  dashboard:
+    environment:
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?set a strong DASHBOARD_PASSWORD in .env before exposing the page}
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [dashboard]
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env (e.g. leads.example.com, without https://)}
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  caddy_data:
+  caddy_config:
