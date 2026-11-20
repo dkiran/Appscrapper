@@ -95,7 +95,10 @@ class Handler(BaseHTTPRequestHandler):
                 return False
         return False
 
-    def do_GET(self):
+    def do_HEAD(self):
+        self.do_GET(head=True)
+
+    def do_GET(self, head=False):
         if not self._authorised():
             if self.headers.get("Authorization"):
                 time.sleep(1)  # slow down password guessing
@@ -126,7 +129,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        self.wfile.write(body)
+        if not head:
+            self.wfile.write(body)
 
 
 def make_server(target, host="127.0.0.1", port=8080, cfg=None):

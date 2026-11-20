@@ -284,7 +284,12 @@ def test_dashboard_stats_and_server(tmp_path, monkeypatch):
     base = f"http://127.0.0.1:{srv.server_address[1]}"
     assert json.load(urllib.request.urlopen(base + "/api/stats"))["total"] == 1
     assert b"Scraper monitor" in urllib.request.urlopen(base + "/").read()
+    head = urllib.request.urlopen(urllib.request.Request(base + "/", method="HEAD"))
+    assert head.status == 200 and head.read() == b""
     monkeypatch.setenv("DASHBOARD_PASSWORD", "pw")
+    with pytest.raises(urllib.error.HTTPError) as eh:
+        urllib.request.urlopen(urllib.request.Request(base + "/", method="HEAD"))
+    assert eh.value.code == 401
     with pytest.raises(urllib.error.HTTPError) as e:
         urllib.request.urlopen(base + "/api/stats")
     assert e.value.code == 401
