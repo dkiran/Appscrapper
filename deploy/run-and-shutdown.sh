@@ -16,9 +16,17 @@ SERVICES="db dashboard"
 if grep -q '^DOMAIN=.\+' .env 2>/dev/null; then FILES="$FILES -f docker-compose.https.yml"; SERVICES="$SERVICES caddy"; fi
 COMPOSE="docker compose $FILES"
 
+# Write an event line into the same database log the dashboard shows (message must not contain single quotes).
+event() {
+    $COMPOSE exec -T db psql -U scraper -d scraper -q -c \
+        "INSERT INTO logs (ts, level, message) VALUES (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS') || '+00:00', 'INFO', '$1')" \
+        >/dev/null 2>&1 || log "could not write event to the database log"
+}
+
 until docker info >/dev/null 2>&1; do sleep 3; done
 log "starting: $SERVICES"
 $COMPOSE up -d $SERVICES
+event "INSTANCE STARTED (booted at $(date -u -d "$(uptime -s)" '+%F %T') UTC)"
 
 now=$(date +%s); last=$(cat "$MARKER" 2>/dev/null || echo 0)
 if [ $((now - last)) -ge $((MIN_HOURS_BETWEEN_RUNS * 3600)) ]; then
@@ -36,5 +44,6 @@ log "dashboard stays up for $KEEP_UP_MINUTES minutes"
 sleep $((KEEP_UP_MINUTES * 60))
 while [ -e "$APP_DIR/stay-up" ]; do sleep 60; done
 log "stopping containers and shutting down"
+event "INSTANCE SHUTTING DOWN (stopping now)"
 $COMPOSE stop
 shutdown -h now
