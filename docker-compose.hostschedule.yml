@@ -1,0 +1,6 @@
+# For "start the EC2 instance on a schedule, scrape once, stop" setups (see deploy/run-and-shutdown.sh).
+# The always-on scheduler container is switched off; the boot script runs the scraper once instead.
+services:
+  scraper:
+    profiles: ["manual"]
+    restart: "no"

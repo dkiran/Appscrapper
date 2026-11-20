@@ -1,0 +1,13 @@
+[Unit]
+Description=Run the Play Store scraper once, then stop this instance
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+ExecStart=/home/ec2-user/Appscrapper/deploy/run-and-shutdown.sh
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

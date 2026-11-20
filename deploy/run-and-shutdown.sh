@@ -1,0 +1,40 @@
+#!/bin/bash
+# Run on instance boot (systemd): one scrape, keep the dashboard up for a while, then stop the instance.
+#   touch ~/Appscrapper/stay-up   keeps the instance running (delete the file to let it stop)
+set -u
+APP_DIR="${APP_DIR:-/home/ec2-user/Appscrapper}"
+KEEP_UP_MINUTES="${KEEP_UP_MINUTES:-60}"          # how long the dashboard stays reachable after the run
+MIN_HOURS_BETWEEN_RUNS="${MIN_HOURS_BETWEEN_RUNS:-20}"   # a manual start inside this window skips the scrape
+MAX_RUN_HOURS="${MAX_RUN_HOURS:-12}"
+log() { echo "[$(date -u '+%F %T') UTC] $*"; }
+
+cd "$APP_DIR" || { log "cannot cd to $APP_DIR"; exit 1; }
+mkdir -p data
+MARKER="$APP_DIR/data/.last_scrape"
+FILES="-f docker-compose.yml -f docker-compose.hostschedule.yml"
+SERVICES="db dashboard"
+if grep -q '^DOMAIN=.\+' .env 2>/dev/null; then FILES="$FILES -f docker-compose.https.yml"; SERVICES="$SERVICES caddy"; fi
+COMPOSE="docker compose $FILES"
+
+until docker info >/dev/null 2>&1; do sleep 3; done
+log "starting: $SERVICES"
+$COMPOSE up -d $SERVICES
+
+now=$(date +%s); last=$(cat "$MARKER" 2>/dev/null || echo 0)
+if [ $((now - last)) -ge $((MIN_HOURS_BETWEEN_RUNS * 3600)) ]; then
+    log "running one scrape (limit ${MAX_RUN_HOURS}h)"
+    if timeout "${MAX_RUN_HOURS}h" $COMPOSE run -T --rm scraper python main.py --once; then
+        date +%s > "$MARKER"; log "scrape finished"
+    else
+        log "scrape exited with an error; will be retried on the next start"
+    fi
+else
+    log "last scrape was $(( (now - last) / 3600 )) h ago; skipping (manual start)"
+fi
+
+log "dashboard stays up for $KEEP_UP_MINUTES minutes"
+sleep $((KEEP_UP_MINUTES * 60))
+while [ -e "$APP_DIR/stay-up" ]; do sleep 60; done
+log "stopping containers and shutting down"
+$COMPOSE stop
+shutdown -h now

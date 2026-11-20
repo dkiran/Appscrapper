@@ -101,3 +101,13 @@ Postgres is tuned small in `docker-compose.yml` and container logs are capped at
 3. In `.env` set `DOMAIN=leads.example.com` (no `https://`) and a long random `DASHBOARD_PASSWORD`.
 4. `docker compose -f docker-compose.yml -f docker-compose.https.yml up -d` - Caddy fetches and renews the Let's Encrypt certificate automatically.
 The login uses HTTP Basic auth over HTTPS, wrong attempts are delayed by 1 s, and the page shows counts and log lines only (no email addresses). Log lines include app and company names.
+
+## Start the EC2 instance on a schedule, scrape once, stop it (saves credits)
+`deploy/run-and-shutdown.sh` runs when the instance boots (systemd unit `deploy/scraper-run.service`): it starts the database and dashboard, runs one scrape, keeps the dashboard up for `KEEP_UP_MINUTES` (60), then stops the containers and shuts the instance down (EC2 "stop", not terminate). A boot within 20 hours of the last scrape (for example you started it by hand to look at the dashboard) skips the scrape. `touch ~/Appscrapper/stay-up` keeps the instance running; delete the file to let it stop.
+Use `docker-compose.hostschedule.yml` with the other compose files so the always-on scheduler container is off. AWS starts the instance with an EventBridge Scheduler rule (see the steps given in chat/README of your deployment). While the instance is stopped the dashboard is offline.
+Install on the server:
+```bash
+cd ~/Appscrapper && git pull
+docker compose stop scraper && docker compose rm -f scraper
+sudo cp deploy/scraper-run.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable scraper-run.service
+```
