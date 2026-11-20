@@ -44,3 +44,12 @@ def test_page_email_extraction():
     from scraper.fetch import email_strings
     blob = [["desc: mail me at x@y.com"], [["a@b.com"], ["Support@B.com", "c@d.org"]]]
     assert [e for _, e in email_strings(blob)] == ["a@b.com", "Support@B.com", "c@d.org"]
+
+
+def test_categories_and_country_filter(tmp_path):
+    from scraper.categories import category_terms
+    assert category_terms(["FINANCE"]) == ["Finance"] and len(category_terms("ALL")) == 49
+    cfg = CFG(tmp_path); cfg.update(search_terms=[], categories=["FINANCE"], developer_countries=["India"])
+    assert scrape(cfg, Fake(), sleep=lambda s: None)["saved"] == 0  # Fake dev is in Kenya
+    cfg["developer_countries"] = ["Kenya"]
+    assert scrape(cfg, Fake(), sleep=lambda s: None)["saved"] == 1

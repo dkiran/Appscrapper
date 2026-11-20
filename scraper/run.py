@@ -3,6 +3,7 @@ import logging
 import time
 
 from . import db
+from .categories import category_terms
 from .country import country_from_address
 
 log = logging.getLogger("playstore")
@@ -33,8 +34,10 @@ def scrape(cfg, fetcher, sleep=time.sleep):
     budget = cfg["max_new_apps_per_run"]
     saved = failed = 0
     seen = set()
+    want_countries = {c.lower() for c in cfg.get("developer_countries") or []}
+    terms = list(cfg.get("search_terms") or []) + category_terms(cfg.get("categories"))
     for country in cfg["countries"]:
-        for term in cfg["search_terms"]:
+        for term in terms:
             if budget <= 0:
                 break
             log.info("searching %r in %s ...", term, country)
@@ -55,7 +58,12 @@ def scrape(cfg, fetcher, sleep=time.sleep):
                 seen.add(pkg)
                 try:
                     d = fetcher.details(pkg, country, cfg["lang"])
-                    db.upsert(conn, to_row(pkg, d, country))
+                    row = to_row(pkg, d, country)
+                    if want_countries and row["country"].lower() not in want_countries:
+                        log.info("  skip %s (developer country %r)", pkg, row["country"] or "unknown")
+                        sleep(cfg["delay_seconds"])
+                        continue
+                    db.upsert(conn, row)
                     saved += 1
                     budget -= 1
                     log.info("  saved %s (%s) email=%s dev_email=%s", pkg, d.get("title"),

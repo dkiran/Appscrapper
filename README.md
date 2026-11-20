@@ -23,3 +23,10 @@ System cron alternative: `0 2 * * * cd /path/playstore-scraper && python main.py
 - `Country` is parsed from the developer address (blank if it can't be recognised); the store region crawled is kept in the DB as `crawl_region`.
 - Scraping Play pages is against Google's Terms of Service and may be rate-limited or blocked; use at your own risk, and handle collected emails in line with applicable privacy/anti-spam law.
 - Not verified against live Play Store (network was blocked where this was built); only the offline tests have been run.
+
+## Category-wise and country-wise
+- `python main.py --list-categories` prints every category id (32 app + 17 game categories).
+- `"categories"` in `config.json`: `"ALL"`, `"APPS"`, `"GAMES"` or a list such as `["FINANCE", "MEDICAL"]`. Each category name is searched as a term, in addition to `search_terms`. The Category column is always the app's real category.
+- `"countries"`: Play Store regions searched (two-letter codes, e.g. `["us", "in", "ke"]`); results differ by region.
+- `"developer_countries"`: e.g. `["India", "Kenya"]` keeps only apps whose developer address ends in that country (empty = keep all).
+- Raise `max_new_apps_per_run` and `results_per_query` for wider coverage; search returns only a limited number of hits per term, so more terms = more apps.

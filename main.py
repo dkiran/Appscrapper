@@ -14,7 +14,13 @@ def main():
     ap.add_argument("--config", default="config.json")
     ap.add_argument("--once", action="store_true", help="run one scrape and exit (use with system cron)")
     ap.add_argument("--inspect", metavar="PACKAGE", help="print where emails sit in a page's data, then exit")
+    ap.add_argument("--list-categories", action="store_true", help="print all category ids and exit")
     args = ap.parse_args()
+    if args.list_categories:
+        from scraper.categories import ALL_CATEGORIES
+        for k, v in ALL_CATEGORIES.items():
+            print(f"{k:22} {v}")
+        return
     if args.inspect:
         for key, path, email in PlayFetcher().inspect(args.inspect):
             print(key, path, email)

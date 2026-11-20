@@ -3,11 +3,22 @@
   "timezone": "UTC",
   "db_path": "data/apps.db",
   "csv_path": "data/apps.csv",
-  "search_terms": ["fleet management", "gps tracker", "fintech", "e-commerce", "health"],
-  "countries": ["us", "in"],
+  "search_terms": [
+    "fleet management",
+    "gps tracker",
+    "fintech",
+    "e-commerce",
+    "health"
+  ],
+  "countries": [
+    "us",
+    "in"
+  ],
   "lang": "en",
   "results_per_query": 10,
   "max_new_apps_per_run": 50,
   "delay_seconds": 1.5,
-  "refresh_after_days": 30
+  "refresh_after_days": 30,
+  "categories": [],
+  "developer_countries": []
 }
