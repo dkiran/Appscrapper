@@ -40,6 +40,19 @@ else
     log "last scrape was $(( (now - last) / 3600 )) h ago; skipping (manual start)"
 fi
 
+# Push new contacts to SingleQR before the instance stops. The always-on sync_cron
+# never fires on this boot→scrape→shutdown schedule, so sync must run here.
+if grep -q '^SINGLEQR_LEADS_URL=.\+' .env 2>/dev/null && grep -q '^SINGLEQR_LEADS_API_KEY=.\+' .env 2>/dev/null; then
+    log "syncing contacts → SingleQR leads"
+    if $COMPOSE run -T --rm scraper python main.py --sync-leads; then
+        log "leads sync finished"
+    else
+        log "leads sync failed; will retry on the next boot (contacts stay in Postgres)"
+    fi
+else
+    log "SINGLEQR_LEADS_URL / SINGLEQR_LEADS_API_KEY not set; skipping leads sync"
+fi
+
 log "dashboard stays up for $KEEP_UP_MINUTES minutes"
 sleep $((KEEP_UP_MINUTES * 60))
 while [ -e "$APP_DIR/stay-up" ]; do sleep 60; done

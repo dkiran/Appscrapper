@@ -85,15 +85,17 @@ Pushes `contacts` rows over HTTPS into SingleQR’s import API so new scraped em
    - `SINGLEQR_LEADS_URL=https://<api-host>/api/v1/admin/leads/import-scraped`
    - `SINGLEQR_LEADS_API_KEY=<same secret>`
    - `SYNC_BOTH_STORES_ONLY=true` (default; outreach-quality filter)
-3. Scheduler: when those env vars are set, the long-running container also runs `--sync-leads` on `sync_cron` (default `0 4 * * *` UTC). Manual:
-   ```bash
-   python main.py --sync-leads --dry-run   # counts / sample payload only
-   python main.py --sync-leads             # POST batches; advances watermark
-   docker compose exec scraper python main.py --sync-leads --dry-run
-   ```
+3. **When it runs**
+   - **EC2 scrape-then-stop** (`deploy/run-and-shutdown.sh`): after the scrape finishes (and before the dashboard wait / shutdown), the boot script runs `python main.py --sync-leads` if those env vars are set. The 04:00 `sync_cron` does **not** apply here — the instance is already stopped.
+   - **Always-on container**: `sync_leads_after_scrape` (default `true`) pushes right after each scrape; `sync_cron` (default `0 4 * * *` UTC) is a backup if the container stays up.
+   - Manual:
+     ```bash
+     python main.py --sync-leads --dry-run   # counts / sample payload only
+     python main.py --sync-leads             # POST batches; advances watermark
+     docker compose run --rm scraper python main.py --sync-leads --dry-run
+     ```
 4. Idempotent: local `leads_synced_emails` + API skip on existing `email` / `play_store_url_key`. Re-run should report `created=0`.
-5. Optional: `"sync_leads_after_scrape": true` in `config.json` to push immediately after each scrape as well as the 04:00 job.
-6. Lead follow-up templates on SingleQR must stay approved/published for mail to actually send.
+5. Lead follow-up templates on SingleQR must stay approved/published for mail to actually send.
 
 Field map: contact `email` → lead `email`; `developer_email` → `developerEmail`; `company` → `company`/`developer`; `website`, `country`, `play_url` → `playStoreUrl`, `ios_url` → `iosApp`; first app name → `appName`; package from Play URL → `packageId`; `source=appscrapper`.
 
@@ -124,7 +126,7 @@ Postgres is tuned small in `docker-compose.yml` and container logs are capped at
 The login uses HTTP Basic auth over HTTPS, wrong attempts are delayed by 1 s, and the page shows counts and log lines only (no email addresses). Log lines include app and company names.
 
 ## Start the EC2 instance on a schedule, scrape once, stop it (saves credits)
-`deploy/run-and-shutdown.sh` runs when the instance boots (systemd unit `deploy/scraper-run.service`): it starts the database and dashboard, runs one scrape, keeps the dashboard up for `KEEP_UP_MINUTES` (60), then stops the containers and shuts the instance down (EC2 "stop", not terminate). A boot within 20 hours of the last scrape (for example you started it by hand to look at the dashboard) skips the scrape. `touch ~/Appscrapper/stay-up` keeps the instance running; delete the file to let it stop.
+`deploy/run-and-shutdown.sh` runs when the instance boots (systemd unit `deploy/scraper-run.service`): it starts the database and dashboard, runs one scrape, **syncs new contacts to SingleQR leads** (when `SINGLEQR_LEADS_*` is set in `.env`), keeps the dashboard up for `KEEP_UP_MINUTES` (60), then stops the containers and shuts the instance down (EC2 "stop", not terminate). A boot within 20 hours of the last scrape (for example you started it by hand to look at the dashboard) skips the scrape but still attempts leads sync. `touch ~/Appscrapper/stay-up` keeps the instance running; delete the file to let it stop.
 Use `docker-compose.hostschedule.yml` with the other compose files so the always-on scheduler container is off. AWS starts the instance with an EventBridge Scheduler rule (see the steps given in chat/README of your deployment). While the instance is stopped the dashboard is offline.
 Install on the server:
 ```bash
