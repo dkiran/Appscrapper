@@ -326,3 +326,61 @@ def test_logs_reach_database_and_dashboard(tmp_path):
     assert got and all(x["level"] != "INFO" for x in got)
     assert json.load(urllib.request.urlopen(base + "/api/stats"))["categories"]["total"] == 2
     srv.shutdown()
+
+
+def test_map_contact_to_lead_and_package():
+    from scraper.sync_leads import map_contact_to_lead, package_from_play_url, first_app_name
+    assert package_from_play_url("https://play.google.com/store/apps/details?id=com.Acme.App&hl=en") == "com.Acme.App"
+    assert first_app_name("Alpha; Beta; Gamma") == "Alpha"
+    lead = map_contact_to_lead({
+        "email": "support@acme.io",
+        "developer_email": "ceo@acme.io, other@acme.io",
+        "company": "Acme",
+        "website": "https://acme.io",
+        "country": "Kenya",
+        "apps": "A; B",
+        "play_url": "https://play.google.com/store/apps/details?id=com.a",
+        "ios_url": "https://apps.apple.com/app/id1",
+        "both_stores": "Yes",
+    }, scraped_at="2026-03-24T04:00:00+00:00")
+    assert lead["email"] == "support@acme.io"
+    assert lead["developerEmail"] == "ceo@acme.io"
+    assert lead["packageId"] == "com.a"
+    assert lead["appName"] == "A"
+    assert lead["source"] == "appscrapper"
+    assert lead["iosApp"].startswith("https://apps.apple.com")
+
+
+def test_sync_leads_dry_run_and_idempotent_local(tmp_path):
+    from scraper import db
+    from scraper.sync_leads import sync_leads, record_synced_emails, select_contacts
+
+    path = str(tmp_path / "s.db")
+    conn = db.connect(path)
+    conn.execute(
+        "INSERT INTO contacts VALUES (?,?,?,?,?,?,?,?,?,?)",
+        ("support@acme.io", "ceo@acme.io", "Acme", "https://acme.io", "Kenya",
+         "App A", 1, "https://play.google.com/store/apps/details?id=com.a",
+         "https://apps.apple.com/app/id1", "Yes"),
+    )
+    conn.execute(
+        "INSERT INTO contacts VALUES (?,?,?,?,?,?,?,?,?,?)",
+        ("only@play.io", "", "PlayOnly", "", "India", "X", 1,
+         "https://play.google.com/store/apps/details?id=com.x", "", "No"),
+    )
+    conn.commit()
+
+    summary = sync_leads(
+        {"sync_both_stores_only": True},
+        conn,
+        dry_run=True,
+    )
+    assert summary["candidates"] == 1
+    assert summary["dry_run"] is True
+    assert summary["sample"][0]["email"] == "support@acme.io"
+
+    record_synced_emails(conn, ["support@acme.io"])
+    again = select_contacts(conn, both_stores_only=True, exclude_synced=True)
+    assert again == []
+    conn.close()
+

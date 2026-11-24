@@ -35,5 +35,10 @@
   "discovery": "ios",
   "ios_results_per_query": 200,
   "resolve_ios_only": true,
-  "resolve_per_run": 250
+  "resolve_per_run": 250,
+  "sync_cron": "0 4 * * *",
+  "sync_both_stores_only": true,
+  "sync_leads_after_scrape": false,
+  "singleqr_leads_url": null,
+  "singleqr_leads_api_key": null
 }

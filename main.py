@@ -1,12 +1,55 @@
 """Play Store app scraper. `python main.py --once` runs now; without it, runs on the cron schedule."""
 import argparse
 import logging
+import os
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from scraper.fetch import PlayFetcher
 from scraper.run import load_config, scrape
+
+
+class _SyncArgs:
+    def __init__(self, dry_run=False, since=None):
+        self.dry_run = dry_run
+        self.since = since
+
+
+def _run_sync_leads(cfg, args):
+    from scraper import db
+    from scraper.run import db_target
+    from scraper.sync_leads import sync_leads
+
+    conn = db.connect(db_target(cfg))
+    try:
+        summary = sync_leads(
+            cfg,
+            conn,
+            dry_run=args.dry_run,
+            since=args.since,
+            resync_all=bool(args.since),
+        )
+        logging.info("sync-leads summary: %s", summary)
+        if args.dry_run and summary.get("sample"):
+            for row in summary["sample"]:
+                logging.info("sample lead: %s", row)
+        return summary
+    finally:
+        conn.close()
+
+
+def _scrape_then_maybe_sync(cfg):
+    scrape(cfg, PlayFetcher())
+    if cfg.get("sync_leads_after_scrape"):
+        try:
+            _run_sync_leads(cfg, _SyncArgs())
+        except Exception:
+            logging.exception("sync-leads after scrape failed (scrape results were kept)")
+
+
+def _sync_configured(cfg):
+    return bool(os.environ.get("SINGLEQR_LEADS_URL") or cfg.get("singleqr_leads_url"))
 
 
 def main():
@@ -17,6 +60,12 @@ def main():
     ap.add_argument("--export", action="store_true", help="write apps.csv and contacts.csv from the database, then exit")
     ap.add_argument("--import-sqlite", metavar="FILE", help="copy an old SQLite file (e.g. data/apps.db) into the database, then exit")
     ap.add_argument("--list-categories", action="store_true", help="print all category ids and exit")
+    ap.add_argument("--sync-leads", action="store_true",
+                    help="push new contacts to SingleQR leads API, then exit")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="with --sync-leads: map and count only, do not POST")
+    ap.add_argument("--since", metavar="ISO",
+                    help="with --sync-leads: ignore local synced-email gate (backend still skips duplicates)")
     args = ap.parse_args()
     if args.list_categories:
         from scraper.categories import ALL_CATEGORIES
@@ -29,6 +78,9 @@ def main():
         return
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     cfg = load_config(args.config)
+    if args.sync_leads:
+        _run_sync_leads(cfg, args)
+        return
     if not (args.export or args.import_sqlite):
         from scraper.dblog import DbLogHandler
         from scraper.run import db_target as _target
@@ -44,7 +96,7 @@ def main():
             print(db.export_csv(conn, cfg["csv_path"]), "apps ->", cfg["csv_path"])
             print(db.export_contacts(conn, cfg["contacts_path"]), "contacts ->", cfg["contacts_path"])
         return
-    job = lambda: scrape(cfg, PlayFetcher())
+    job = lambda: _scrape_then_maybe_sync(cfg)
     if args.once:
         job()
         return
@@ -53,7 +105,18 @@ def main():
     sched = BlockingScheduler(timezone=cfg["timezone"])
     sched.add_job(job, CronTrigger.from_crontab(cfg["schedule_cron"], timezone=cfg["timezone"]),
                   max_instances=1, coalesce=True)
-    logging.info("scheduled: %s (%s). Ctrl+C to stop.", cfg["schedule_cron"], cfg["timezone"])
+    sync_cron = cfg.get("sync_cron") or "0 4 * * *"
+    if _sync_configured(cfg):
+        # Separate daily sync (default 04:00 UTC) so contacts land even if scrape overruns.
+        sched.add_job(
+            lambda: _run_sync_leads(cfg, _SyncArgs()),
+            CronTrigger.from_crontab(sync_cron, timezone=cfg["timezone"]),
+            id="sync_leads",
+            max_instances=1,
+            coalesce=True,
+        )
+        logging.info("scheduled sync-leads: %s (%s)", sync_cron, cfg["timezone"])
+    logging.info("scheduled scrape: %s (%s). Ctrl+C to stop.", cfg["schedule_cron"], cfg["timezone"])
     try:
         sched.start()
     except (KeyboardInterrupt, SystemExit):

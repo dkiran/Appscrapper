@@ -27,6 +27,9 @@ services:
       db: { condition: service_healthy }
     environment:
       DATABASE_URL: postgresql://scraper:${POSTGRES_PASSWORD}@db:5432/scraper
+      SINGLEQR_LEADS_URL: ${SINGLEQR_LEADS_URL:-}
+      SINGLEQR_LEADS_API_KEY: ${SINGLEQR_LEADS_API_KEY:-}
+      SYNC_BOTH_STORES_ONLY: ${SYNC_BOTH_STORES_ONLY:-true}
     volumes:
       - ./config.json:/app/config.json:ro
       - ./data:/app/data            # only used by `--export`

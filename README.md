@@ -76,6 +76,27 @@ Move an existing local SQLite file into Postgres: `docker compose cp data/apps.d
 
 Back up with `docker compose exec db pg_dump -U scraper scraper > backup.sql`.
 
+## Daily sync → SingleQR leads
+
+Pushes `contacts` rows over HTTPS into SingleQR’s import API so new scraped emails enter the existing 14-day Lead follow-up (no CampaignAdmin auto-runs). The scraper never opens the SingleQR DB.
+
+1. On the **SingleQR API** host set `LEADS_IMPORT_API_KEY` to a long random secret.
+2. On the **scraper** host (`.env` / Compose), set:
+   - `SINGLEQR_LEADS_URL=https://<api-host>/api/v1/admin/leads/import-scraped`
+   - `SINGLEQR_LEADS_API_KEY=<same secret>`
+   - `SYNC_BOTH_STORES_ONLY=true` (default; outreach-quality filter)
+3. Scheduler: when those env vars are set, the long-running container also runs `--sync-leads` on `sync_cron` (default `0 4 * * *` UTC). Manual:
+   ```bash
+   python main.py --sync-leads --dry-run   # counts / sample payload only
+   python main.py --sync-leads             # POST batches; advances watermark
+   docker compose exec scraper python main.py --sync-leads --dry-run
+   ```
+4. Idempotent: local `leads_synced_emails` + API skip on existing `email` / `play_store_url_key`. Re-run should report `created=0`.
+5. Optional: `"sync_leads_after_scrape": true` in `config.json` to push immediately after each scrape as well as the 04:00 job.
+6. Lead follow-up templates on SingleQR must stay approved/published for mail to actually send.
+
+Field map: contact `email` → lead `email`; `developer_email` → `developerEmail`; `company` → `company`/`developer`; `website`, `country`, `play_url` → `playStoreUrl`, `ios_url` → `iosApp`; first app name → `appName`; package from Play URL → `packageId`; `source=appscrapper`.
+
 ## iOS-first discovery (default)
 `"discovery": "ios"` starts from the App Store, which has an official public search API returning up to 200 apps per request with bundle ID, seller name and website. For each new app it opens the Google Play page directly by that bundle ID (many developers reuse the same ID on Android), so one request confirms both stores. Found on Play = `Both Stores: Yes`, `iOS match: bundle-id`, with the support/developer emails from the Play page. Not on Play under that ID = stored as `ios-only` (no emails; use it for the App Store only list, or match it by name later). Nothing is dropped, nothing is re-checked.
 - `"play"` = the earlier Google-Play-first method; `"both"` = iOS-first then Play-first.
