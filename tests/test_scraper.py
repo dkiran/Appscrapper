@@ -328,6 +328,21 @@ def test_logs_reach_database_and_dashboard(tmp_path):
     srv.shutdown()
 
 
+def test_normalize_leads_url():
+    from scraper.sync_leads import normalize_leads_url
+    assert normalize_leads_url("api.singleqr.in/api/v1/admin/leads/import-scraped") == (
+        "https://api.singleqr.in/api/v1/admin/leads/import-scraped"
+    )
+    assert normalize_leads_url("https://api.singleqr.in/api/v1/admin/leads/import-scraped/") == (
+        "https://api.singleqr.in/api/v1/admin/leads/import-scraped"
+    )
+    try:
+        normalize_leads_url("http://api.singleqr.in/x")
+        assert False, "expected https-only error"
+    except RuntimeError:
+        pass
+
+
 def test_map_contact_to_lead_and_package():
     from scraper.sync_leads import map_contact_to_lead, package_from_play_url, first_app_name
     assert package_from_play_url("https://play.google.com/store/apps/details?id=com.Acme.App&hl=en") == "com.Acme.App"

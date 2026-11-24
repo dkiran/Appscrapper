@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urlparse
 
 log = logging.getLogger("playstore.sync_leads")
 
-BATCH_SIZE = 500
+BATCH_SIZE = 2000  # keep under API max (5000); fewer batches → fewer transfer log rows
 DEFAULT_SYNC_CRON = "0 4 * * *"
 
 
@@ -29,6 +29,18 @@ def _parse_bool(value, default=True):
     if value is None or value == "":
         return default
     return str(value).strip().lower() in ("1", "true", "yes", "on", "enable", "enabled")
+
+
+def normalize_leads_url(url):
+    """Require an absolute HTTPS URL; prepend https:// if the scheme was omitted."""
+    raw = (url or "").strip()
+    if not raw:
+        return raw
+    if "://" not in raw:
+        raw = f"https://{raw}"
+    if not raw.lower().startswith("https://"):
+        raise RuntimeError(f"SINGLEQR_LEADS_URL must use https:// (got {url!r})")
+    return raw.rstrip("/")
 
 
 def package_from_play_url(url):
@@ -204,7 +216,7 @@ def sync_leads(cfg, conn, *, dry_run=False, since=None, resync_all=False):
     Select due contacts, map to API payload, POST in batches, advance watermark on success.
     Returns summary dict.
     """
-    url = _env_or_cfg(cfg, "SINGLEQR_LEADS_URL", "singleqr_leads_url")
+    url = normalize_leads_url(_env_or_cfg(cfg, "SINGLEQR_LEADS_URL", "singleqr_leads_url"))
     api_key = _env_or_cfg(cfg, "SINGLEQR_LEADS_API_KEY", "singleqr_leads_api_key")
     both_only = _parse_bool(
         _env_or_cfg(cfg, "SYNC_BOTH_STORES_ONLY", "sync_both_stores_only", "true"),
