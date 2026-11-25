@@ -78,6 +78,11 @@ class _Stop(Exception):
     pass
 
 
+# The Play library raises these when it cannot read a result page (a parse problem for that one query),
+# which is not a sign that Google is blocking us.
+_PARSE_ERRORS = (TypeError, IndexError, KeyError, AttributeError)
+
+
 def scrape(cfg, fetcher, sleep=time.sleep):
     """Never re-fetches a stored app and never repeats a finished search; never drops a scraped app
     (App Store / developer-country conditions only filter the contacts file)."""
@@ -120,7 +125,11 @@ def scrape(cfg, fetcher, sleep=time.sleep):
     mode = cfg.get("discovery", "ios")  # "ios" (App Store first), "play" (Google Play first) or "both"
     try:
         if cfg.get("resolve_ios_only", True) and mode in ("ios", "both"):
-            _resolve_ios_only(cfg, fetcher, conn, known, sleep, fail, ok, stats)
+            try:
+                _resolve_ios_only(cfg, fetcher, conn, known, sleep, fail, ok, stats)
+            except _Stop:
+                log.warning("App Store-only resolver paused after repeated errors; continuing with discovery")
+                ok()  # reset the failure streak so discovery gets a fresh start
         if mode in ("ios", "both"):
             ios_todo = due_searches(conn, countries, ["ios:" + t for t in terms], cfg.get("search_repeat_days"))
             log.info("iOS-first: %d searches due (%d terms x %d countries)", len(ios_todo), len(terms), len(countries))
@@ -207,7 +216,15 @@ def _resolve_ios_only(cfg, fetcher, conn, known, sleep, fail, ok, stats):
     for r in rows:
         region = r["crawl_region"] or "us"
         try:
-            hits = fetcher.search(r["app"], region, cfg["lang"], 5)
+            try:
+                hits = fetcher.search(r["app"], region, cfg["lang"], 5)
+            except _PARSE_ERRORS as e:
+                log.info("  Play results unreadable for %r (%s); marked resolve-unreadable, not retried", r["app"], e)
+                db.set_match(conn, r["package"], "resolve-unreadable")
+                stats["unreadable"] = stats.get("unreadable", 0) + 1
+                ok()  # the server answered; this is not a block
+                sleep(cfg["delay_seconds"])
+                continue
             sleep(cfg["delay_seconds"])
             cands = sorted((h for h in hits if h.get("appId") and similar(r["app"], h.get("title")) >= 0.75),
                            key=lambda h: -similar(r["app"], h.get("title")))[:2]
@@ -215,7 +232,11 @@ def _resolve_ios_only(cfg, fetcher, conn, known, sleep, fail, ok, stats):
                        "trackViewUrl": r["ios_url"]}
             found = None
             for h in cands:
-                d = fetcher.details(h["appId"], region, cfg["lang"])
+                try:
+                    d = fetcher.details(h["appId"], region, cfg["lang"])
+                except _PARSE_ERRORS + (NotFoundError,):
+                    sleep(cfg["delay_seconds"])
+                    continue  # unreadable or missing candidate: try the next one
                 sleep(cfg["delay_seconds"])
                 m, _ = best_match(d.get("title"), d.get("developer"), d.get("developerWebsite"), [ios_rec])
                 if m:

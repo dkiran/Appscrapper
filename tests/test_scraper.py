@@ -399,3 +399,46 @@ def test_sync_leads_dry_run_and_idempotent_local(tmp_path):
     assert again == []
     conn.close()
 
+
+
+def _seed_ios_only(conn, n):
+    from scraper import db
+    for i in range(n):
+        db.upsert(conn, {"package": f"net.x.app{i}", "app": f"App {i}", "company": "X", "website": "https://x.io",
+                         "url": "", "ios_url": f"https://apps.apple.com/app/id{i}", "ios_match": "ios-only",
+                         "crawl_region": "us", "fetched_at": db.now()})
+
+
+class ResolverFake(Fake):
+    def __init__(self, search_error):
+        super().__init__(); self.search_error = search_error; self.ios_searches = 0
+    def search(self, t, c, l, n): raise self.search_error
+    def ios_search(self, term, country, limit): self.ios_searches += 1; return []
+
+
+def test_unreadable_play_results_do_not_trip_breaker_or_block_discovery(tmp_path):
+    """Regression: 10 apps whose Play results the library cannot parse stopped every run after 7 seconds."""
+    from scraper import db
+    from scraper.run import db_target
+    cfg = CFG(tmp_path); cfg.update(discovery="ios", search_terms=["Business"], countries=["us"],
+                                    max_consecutive_failures=3, resolve_per_run=50)
+    conn = db.connect(db_target(cfg)); _seed_ios_only(conn, 12)
+    f = ResolverFake(TypeError("'NoneType' object is not subscriptable"))
+    scrape(cfg, f, sleep=lambda s: None)
+    rows = conn.execute("SELECT ios_match, COUNT(*) AS n FROM apps GROUP BY ios_match").fetchall()
+    assert {r["ios_match"]: r["n"] for r in rows} == {"resolve-unreadable": 12}  # all handled, none retried forever
+    assert f.ios_searches == 1  # discovery still ran
+    f2 = ResolverFake(TypeError("x")); scrape(cfg, f2, sleep=lambda s: None)
+    assert f2.ios_searches == 0  # search already finished; and the 12 are not queued again
+
+
+def test_real_errors_pause_resolver_but_discovery_continues(tmp_path):
+    from scraper import db
+    from scraper.run import db_target
+    cfg = CFG(tmp_path); cfg.update(discovery="ios", search_terms=["Business"], countries=["us"],
+                                    max_consecutive_failures=3, resolve_per_run=50)
+    conn = db.connect(db_target(cfg)); _seed_ios_only(conn, 12)
+    f = ResolverFake(OSError("connection reset"))
+    scrape(cfg, f, sleep=lambda s: None)
+    pending = conn.execute("SELECT COUNT(*) AS n FROM apps WHERE ios_match = 'ios-only'").fetchone()["n"]
+    assert pending == 12 and f.ios_searches == 1  # network errors: nothing marked, resolver paused, discovery ran
