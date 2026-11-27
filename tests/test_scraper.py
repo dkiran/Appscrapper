@@ -152,6 +152,62 @@ def test_stops_after_consecutive_failures_and_jitters(tmp_path):
     assert delays and all(2.8 <= d <= 6.0 for d in delays) and len(set(delays)) > 1
 
 
+def test_app_store_http_400_does_not_stop_run(tmp_path):
+    import urllib.error
+    from google_play_scraper.exceptions import NotFoundError
+    from scraper import db
+    from scraper.run import db_target
+
+    class Mixed(Fake):
+        def ios_search(self, term, country, limit=200):
+            if country in ("aq", "as", "aw"):
+                raise urllib.error.HTTPError(
+                    f"https://itunes.apple.com/search?country={country}",
+                    400,
+                    "Bad Request",
+                    hdrs=None,
+                    fp=None,
+                )
+            return [{
+                "bundleId": "com.us.biz",
+                "trackName": "Biz",
+                "sellerName": "Co",
+                "sellerUrl": "https://co.example",
+                "trackViewUrl": "https://apps.apple.com/app/idus",
+                "primaryGenreName": "Business",
+            }]
+
+        def details(self, p, c, l):
+            raise NotFoundError("missing")
+
+    cfg = CFG(tmp_path)
+    cfg.update(
+        discovery="ios",
+        check_ios=False,
+        resolve_ios_only=False,
+        max_consecutive_failures=3,
+        countries=["aq", "as", "aw", "us"],
+        categories=[],
+        search_terms=["Business"],
+        ios_delay_seconds=0,
+        delay_seconds=0,
+        max_new_apps_per_run=10,
+        export_csv=False,
+    )
+    r = scrape(cfg, Mixed(), sleep=lambda s: None)
+    assert r["failed"] == 0
+    assert r["saved"] >= 1
+    conn = db.connect(db_target(cfg))
+    done = {
+        row["country"]
+        for row in conn.execute(
+            "SELECT country FROM searches WHERE term=? AND COALESCE(done_at,'') <> ''",
+            ("ios:Business",),
+        ).fetchall()
+    }
+    assert done >= {"aq", "as", "aw", "us"}
+
+
 def test_order_is_category_across_all_countries_first(tmp_path):
     from scraper import db
     from scraper.run import due_searches

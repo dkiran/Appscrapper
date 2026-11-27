@@ -171,10 +171,13 @@ def search_failed(conn, term, country, max_attempts=3):
     return False
 
 
-def pending_ios(conn, limit):
-    """Stored apps whose App Store check never ran or failed."""
-    return conn.execute("SELECT package, app, company, website, crawl_region FROM apps "
-                        "WHERE ios_match IS NULL OR ios_match = 'unchecked' LIMIT ?", (limit,)).fetchall()
+def pending_ios(conn, limit=None):
+    """Stored apps whose App Store check never ran or failed. limit=None = no cap."""
+    sql = ("SELECT package, app, company, website, crawl_region FROM apps "
+           "WHERE ios_match IS NULL OR ios_match = 'unchecked'")
+    if limit:
+        return conn.execute(sql + " LIMIT ?", (int(limit),)).fetchall()
+    return conn.execute(sql).fetchall()
 
 
 def set_ios(conn, package, url, match):
@@ -183,11 +186,15 @@ def set_ios(conn, package, url, match):
     conn.commit()
 
 
-def pending_resolve(conn, limit):
-    """App Store apps with no same-ID Android app, those with a website first (best for confirming a match)."""
-    return conn.execute("SELECT package, app, company, website, ios_url, crawl_region FROM apps "
-                        "WHERE ios_match = 'ios-only' ORDER BY CASE WHEN COALESCE(website,'') <> '' THEN 0 ELSE 1 END, "
-                        "fetched_at LIMIT ?", (limit,)).fetchall()
+def pending_resolve(conn, limit=None):
+    """App Store apps with no same-ID Android app, those with a website first (best for confirming a match).
+    limit=None = no cap."""
+    sql = ("SELECT package, app, company, website, ios_url, crawl_region FROM apps "
+           "WHERE ios_match = 'ios-only' ORDER BY CASE WHEN COALESCE(website,'') <> '' THEN 0 ELSE 1 END, "
+           "fetched_at")
+    if limit:
+        return conn.execute(sql + " LIMIT ?", (int(limit),)).fetchall()
+    return conn.execute(sql).fetchall()
 
 
 def set_match(conn, package, match):

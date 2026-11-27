@@ -16,6 +16,41 @@ from .country import country_from_address
 
 log = logging.getLogger("playstore")
 
+# iTunes Search rejects many ISO codes (territories / non-storefronts) with HTTP 400.
+# When config countries is ALL, App Store discovery uses this curated list instead of every pycountry code.
+APP_STORE_COUNTRIES = [
+    "ae", "ag", "ai", "al", "am", "ao", "ar", "at", "au", "az",
+    "bb", "be", "bf", "bg", "bh", "bj", "bm", "bn", "bo", "br", "bs", "bt", "bw", "by", "bz",
+    "ca", "cg", "ch", "cl", "cn", "co", "cr", "cv", "cy", "cz",
+    "de", "dk", "dm", "do", "dz",
+    "ec", "ee", "eg", "es",
+    "fi", "fj", "fm", "fr",
+    "gb", "gd", "gh", "gm", "gr", "gt", "gw", "gy",
+    "hk", "hn", "hr", "hu",
+    "id", "ie", "il", "in", "iq", "is", "it",
+    "jm", "jo", "jp",
+    "ke", "kg", "kh", "kn", "kr", "kw", "ky", "kz",
+    "la", "lb", "lc", "lk", "lr", "lt", "lu", "lv", "ly",
+    "ma", "md", "me", "mg", "mk", "ml", "mm", "mn", "mo", "mr", "ms", "mt", "mu", "mv", "mw", "mx", "my", "mz",
+    "na", "ne", "ng", "ni", "nl", "no", "np", "nz",
+    "om",
+    "pa", "pe", "pg", "ph", "pk", "pl", "pt", "pw", "py",
+    "qa",
+    "ro", "rs", "ru", "rw",
+    "sa", "sb", "sc", "se", "sg", "si", "sk", "sl", "sn", "sr", "sv", "sz",
+    "tc", "td", "th", "tj", "tm", "tn", "to", "tr", "tt", "tw", "tz",
+    "ua", "ug", "us", "uy", "uz",
+    "vc", "ve", "vg", "vn", "vu",
+    "xk",
+    "ye",
+    "za", "zm", "zw",
+]
+
+
+def _is_http_400(exc):
+    msg = str(exc).lower()
+    return "400" in msg and ("bad request" in msg or "http error" in msg)
+
 
 def to_row(package, d, region):
     address = (d.get("developerAddress") or "").replace("\n", ", ")
@@ -54,8 +89,11 @@ def db_target(cfg):
     return os.environ.get("DATABASE_URL") or cfg.get("database_url") or cfg["db_path"]
 
 
-def resolve_countries(value):
+def resolve_countries(value, *, for_app_store=False):
+    """Return ISO country codes to search. for_app_store=True uses App Store storefronts when value is ALL."""
     if value in (None, "", "ALL"):
+        if for_app_store:
+            return list(APP_STORE_COUNTRIES)
         return sorted(c.alpha_2.lower() for c in pycountry.countries)
     return [c.lower() for c in value]
 
@@ -114,15 +152,17 @@ def scrape(cfg, fetcher, sleep=time.sleep):
     terms = list(cfg.get("search_terms") or []) + category_terms(cfg.get("categories"))
 
     if cfg.get("check_ios"):  # finish App Store checks that never ran or failed earlier
-        for r in db.pending_ios(conn, cfg.get("ios_recheck_per_run", 50)):
+        recheck = cfg.get("ios_recheck_per_run")  # null/0 = no cap
+        for r in db.pending_ios(conn, recheck or None):
             url, why = _ios_check(cfg, fetcher, sleep, r["app"], r["company"], r["website"], r["crawl_region"] or "us",
                                   package=r["package"])
             if why != "unchecked":
                 db.set_ios(conn, r["package"], url, why)
                 log.info("  App Store check %s: %s", r["package"], why)
 
-    countries = resolve_countries(cfg.get("countries"))
     mode = cfg.get("discovery", "ios")  # "ios" (App Store first), "play" (Google Play first) or "both"
+    play_countries = resolve_countries(cfg.get("countries"))
+    ios_countries = resolve_countries(cfg.get("countries"), for_app_store=True)
     try:
         if cfg.get("resolve_ios_only", True) and mode in ("ios", "both"):
             try:
@@ -131,12 +171,17 @@ def scrape(cfg, fetcher, sleep=time.sleep):
                 log.warning("App Store-only resolver paused after repeated errors; continuing with discovery")
                 ok()  # reset the failure streak so discovery gets a fresh start
         if mode in ("ios", "both"):
-            ios_todo = due_searches(conn, countries, ["ios:" + t for t in terms], cfg.get("search_repeat_days"))
-            log.info("iOS-first: %d searches due (%d terms x %d countries)", len(ios_todo), len(terms), len(countries))
+            ios_todo = due_searches(conn, ios_countries, ["ios:" + t for t in terms], cfg.get("search_repeat_days"))
+            log.info(
+                "iOS-first: %d searches due (%d terms x %d App Store countries)",
+                len(ios_todo),
+                len(terms),
+                len(ios_countries),
+            )
             _run_ios_first(cfg, fetcher, conn, ios_todo, known, cap, deadline, sleep, fail, ok, stats)
         if mode in ("play", "both"):
-            todo = due_searches(conn, countries, terms, cfg.get("search_repeat_days"))
-            log.info("Play-first: %d searches due (%d terms x %d countries)", len(todo), len(terms), len(countries))
+            todo = due_searches(conn, play_countries, terms, cfg.get("search_repeat_days"))
+            log.info("Play-first: %d searches due (%d terms x %d countries)", len(todo), len(terms), len(play_countries))
             _run_searches(cfg, fetcher, conn, todo, known, cap, deadline, sleep, fail, ok, stats)
     except _Stop:
         pass
@@ -209,7 +254,8 @@ def _run_searches(cfg, fetcher, conn, todo, known, cap, deadline, sleep, fail, o
 def _resolve_ios_only(cfg, fetcher, conn, known, sleep, fail, ok, stats):
     """For App Store apps with no same-ID Android app: search Google Play by name and accept a result only
     if the website matches, or the name and developer both match closely. Result is recorded either way."""
-    limit = cfg.get("resolve_per_run", 250)
+    # null/0 = resolve all pending ios-only apps this run (dedupe via known packages)
+    limit = cfg.get("resolve_per_run") or None
     rows = db.pending_resolve(conn, limit)
     if rows:
         log.info("resolving %d App Store-only apps by name ...", len(rows))
@@ -286,6 +332,11 @@ def _run_ios_first(cfg, fetcher, conn, todo, known, cap, deadline, sleep, fail, 
             results = fetcher.ios_search(term, country, cfg.get("ios_results_per_query", 200))
         except Exception as e:
             log.warning("App Store search failed term=%r country=%s: %s", term, country, e)
+            if _is_http_400(e):
+                # Unsupported storefront — mark done and keep going (do not burn failure streak).
+                db.mark_search_done(conn, key, country)
+                sleep(cfg.get("ios_delay_seconds", 3))
+                continue
             db.search_failed(conn, key, country)
             fail()
             sleep(cfg.get("ios_delay_seconds", 3))
