@@ -161,11 +161,14 @@ def test_app_store_http_400_does_not_stop_run(tmp_path):
     import urllib.error
     from google_play_scraper.exceptions import NotFoundError
     from scraper import db
-    from scraper.run import db_target
+    from scraper.run import db_target, resolve_countries
+
+    # Invalid territories are dropped before search.
+    assert resolve_countries(["aq", "as", "aw", "us"]) == ["us"]
 
     class Mixed(Fake):
         def ios_search(self, term, country, limit=200):
-            if country in ("aq", "as", "aw"):
+            if country in ("af", "al", "am"):
                 raise urllib.error.HTTPError(
                     f"https://itunes.apple.com/search?country={country}",
                     400,
@@ -191,7 +194,7 @@ def test_app_store_http_400_does_not_stop_run(tmp_path):
         check_ios=False,
         resolve_ios_only=False,
         max_consecutive_failures=3,
-        countries=["aq", "as", "aw", "us"],
+        countries=["af", "al", "am", "us"],
         categories=[],
         search_terms=["Business"],
         ios_delay_seconds=0,
@@ -210,7 +213,7 @@ def test_app_store_http_400_does_not_stop_run(tmp_path):
             ("ios:Business",),
         ).fetchall()
     }
-    assert done >= {"aq", "as", "aw", "us"}
+    assert done >= {"af", "al", "am", "us"}
 
 
 def test_order_is_category_across_all_countries_first(tmp_path):
