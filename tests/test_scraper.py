@@ -151,9 +151,11 @@ def test_stops_after_consecutive_failures_and_jitters(tmp_path):
     class Blocked(Fake):
         def search(self, t, c, l, n): return [{"appId": f"com.{i}"} for i in range(20)]
         def details(self, p, c, l): self.detail_calls += 1; raise RuntimeError("429")
-    f = Blocked(); cfg = CFG(tmp_path); cfg["max_consecutive_failures"] = 3; cfg["delay_seconds"] = 4
+    f = Blocked(); cfg = CFG(tmp_path)
+    cfg.update(max_consecutive_failures=3, delay_seconds=4, failure_backoff_seconds=4)
     r = scrape(cfg, f, sleep=delays.append)
     assert f.detail_calls == 3 and r["failed"] == 3  # stopped early instead of hammering 20 apps
+    assert r.get("stopped_early") is True
     assert delays and all(2.8 <= d <= 6.0 for d in delays) and len(set(delays)) > 1
 
 

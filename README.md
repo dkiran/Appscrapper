@@ -7,15 +7,17 @@ Scheduled scraper that collects Google Play apps into SQLite and exports
 ```bash
 pip install -r requirements.txt
 python main.py --once      # run one scrape now
-python main.py             # stay running, scrape on config.json "schedule_cron" (default 02:00 UTC daily)
+python main.py             # continuous loop (default) or cron if schedule_mode is cron
 pytest                     # offline tests
 ```
 
-System cron alternative: `0 2 * * * cd /path/playstore-scraper && python main.py --once`
+System cron alternative: set `"schedule_mode": "cron"` and `"schedule_cron": "0 2 * * *"`, or run `python main.py --once` from host cron.
 
 ## Config (`config.json`)
+- `schedule_mode`: `"continuous"` (default) keeps scraping Play + App Store forever with pauses between runs; `"cron"` uses `schedule_cron`.
+- `loop_pause_minutes` (45): rest after a normal run finishes. `block_cooldown_minutes` (120): longer rest after a failure-streak stop (likely rate limit).
 - `search_terms` + `countries`: how apps are discovered (Play has no "list all apps" endpoint).
-- `max_new_apps_per_run`, `delay_seconds`: throttle. Keep them conservative to avoid blocks.
+- `max_new_apps_per_run`, `delay_seconds`, `ios_delay_seconds`, `failure_backoff_seconds`: throttle. Keep them conservative to avoid blocks.
 - Nothing is scraped twice: stored apps are never fetched again, and a finished (term, country) search is skipped on later runs, so each scheduled run works through the *next* searches. When all are done it says so; add terms/categories/countries for more. `refresh_after_days` (default `null` = never) can be set to re-fetch old apps.
 - Nothing scraped is dropped: `apps.csv` holds every app. `require_ios` and `developer_countries` only filter `contacts.csv`. Apps whose App Store check failed or never ran are re-checked at the start of later runs (`ios_recheck_per_run`).
 
@@ -47,7 +49,7 @@ Both CSVs end with `Play Store URL`/`App Store URL` (blank when the app isn't on
 Defaults: `"categories": "ALL"` (configured category set). `"countries": "ALL"` uses **Google Play–supported storefront codes only** (see `scraper/play_countries.py`) — never invalid ISO territories like `aq`/`bv`. Explicit country lists are filtered to that same Play set. App Store HTTP 400s (if any) are marked done and do not stop the run. Set `max_new_apps_per_run` / `max_runtime_minutes` to `null` for continuous scraping (dedupe only).
 
 ## Staying under the radar
-Delays are randomised (about 0.7x to 1.5x of `delay_seconds`, default 4s), a run is capped at `max_new_apps_per_run` (1500) and `max_runtime_minutes`, and it stops itself after `max_consecutive_failures` (10) failed requests in a row, e.g. a 429 block, then continues on the next scheduled run. Raise volume gradually only if runs finish without failures.
+Delays are randomised (about 0.7x to 1.5x of `delay_seconds`, default 5s between Play hits; `ios_delay_seconds` default 4s for Apple). Failed requests take an extra `failure_backoff_seconds` pause. A run stops after `max_consecutive_failures` (10) errors in a row (e.g. 429), then the continuous loop waits `block_cooldown_minutes` before trying again. Caps `max_new_apps_per_run` / `max_runtime_minutes` stay `null` so each run works until due searches are done or a block pause. Raise volume gradually only if runs finish without failures.
 
 ## Order of work
 Searches run one category at a time across **every** country, in the order listed in `"categories"` (default: Business, Finance, Shopping, Food & Drink, Travel & Local, Lifestyle, Education, Health & Fitness), then the next category. So after the first category every country has been covered once. Put a single category in the list to cover only that one.
@@ -59,10 +61,10 @@ On any Linux server with Docker:
 ```bash
 git clone https://github.com/dkiran/Appscrapper.git && cd Appscrapper
 cp .env.example .env            # then edit: set a strong POSTGRES_PASSWORD
-docker compose up -d --build    # starts Postgres + the scheduler (daily at schedule_cron, default 02:00 UTC)
+docker compose up -d --build    # starts Postgres + continuous scraper loop
 docker compose logs -f scraper  # watch progress
 ```
-Set `"run_on_start": true` in `config.json` to also scrape immediately when the container starts. Postgres listens on the server's localhost only; keep it that way, and use an SSH tunnel to query it from your laptop (`ssh -L 5432:localhost:5432 user@server`).
+Default `config.json` uses `"schedule_mode": "continuous"` so the scraper container keeps discovering apps with request gaps and inter-run pauses. Postgres listens on the server's localhost only; keep it that way, and use an SSH tunnel to query it from your laptop (`ssh -L 5432:localhost:5432 user@server`).
 
 Tables: `apps` (every app; `both_stores` is `Yes`/`No`), `contacts` (one row per company, rebuilt after each run), `searches` (which searches are done). Examples:
 ```sql

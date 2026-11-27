@@ -1,7 +1,9 @@
-"""Play Store app scraper. `python main.py --once` runs now; without it, runs on the cron schedule."""
+"""Play Store app scraper. `python main.py --once` runs now; without it, continuous loop or cron."""
 import argparse
 import logging
 import os
+import random
+import time
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -43,16 +45,56 @@ def _run_sync_leads(cfg, args):
 
 
 def _scrape_then_maybe_sync(cfg):
-    scrape(cfg, PlayFetcher())
+    result = scrape(cfg, PlayFetcher())
     if cfg.get("sync_leads_after_scrape"):
         try:
             _run_sync_leads(cfg, _SyncArgs())
         except Exception:
             logging.exception("sync-leads after scrape failed (scrape results were kept)")
+    return result or {}
 
 
 def _sync_configured(cfg):
     return bool(os.environ.get("SINGLEQR_LEADS_URL") or cfg.get("singleqr_leads_url"))
+
+
+def _is_continuous(cfg):
+    mode = str(cfg.get("schedule_mode") or "").strip().lower()
+    cron = cfg.get("schedule_cron")
+    return mode in ("continuous", "loop") or cron in (None, "", "continuous", "loop")
+
+
+def _pause_seconds(minutes, jitter=0.2):
+    base = max(1, float(minutes or 1) * 60)
+    return base * random.uniform(1.0 - jitter, 1.0 + jitter)
+
+
+def _run_continuous(cfg):
+    """Scrape forever: request pacing is inside scrape(); pause between runs to avoid blocks."""
+    pause_m = cfg.get("loop_pause_minutes", 45)
+    block_m = cfg.get("block_cooldown_minutes", 120)
+    logging.info(
+        "continuous scrape: delay_seconds=%s ios_delay_seconds=%s "
+        "loop_pause_minutes=%s block_cooldown_minutes=%s. Ctrl+C to stop.",
+        cfg.get("delay_seconds"),
+        cfg.get("ios_delay_seconds"),
+        pause_m,
+        block_m,
+    )
+    while True:
+        try:
+            result = _scrape_then_maybe_sync(cfg)
+        except Exception:
+            logging.exception("scrape loop iteration failed; cooling down")
+            result = {"stopped_early": True}
+        wait_m = block_m if result.get("stopped_early") else pause_m
+        wait_s = _pause_seconds(wait_m)
+        logging.info(
+            "continuous scrape: sleeping %.0f min before next run (stopped_early=%s)",
+            wait_s / 60.0,
+            bool(result.get("stopped_early")),
+        )
+        time.sleep(wait_s)
 
 
 def main():
@@ -102,10 +144,16 @@ def main():
             print(db.export_csv(conn, cfg["csv_path"]), "apps ->", cfg["csv_path"])
             print(db.export_contacts(conn, cfg["contacts_path"]), "contacts ->", cfg["contacts_path"])
         return
-    job = lambda: _scrape_then_maybe_sync(cfg)
     if args.once:
-        job()
+        _scrape_then_maybe_sync(cfg)
         return
+    if _is_continuous(cfg):
+        try:
+            _run_continuous(cfg)
+        except (KeyboardInterrupt, SystemExit):
+            pass
+        return
+    job = lambda: _scrape_then_maybe_sync(cfg)
     if cfg.get("run_on_start"):
         job()
     sched = BlockingScheduler(timezone=cfg["timezone"])

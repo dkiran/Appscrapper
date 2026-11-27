@@ -59,8 +59,10 @@ fi
 if [ "$SHUTDOWN_AFTER_RUN" != "1" ] || [ -e "$APP_DIR/stay-up" ]; then
     log "keeping instance up (continuous scraping; SHUTDOWN_AFTER_RUN=${SHUTDOWN_AFTER_RUN})"
     event "INSTANCE STAYING UP (continuous scrape)"
-    # Ensure the always-on scraper scheduler is running (not hostschedule-only one-shot).
-    $COMPOSE up -d scraper 2>/dev/null || true
+    # hostschedule.yml puts scraper behind profile "manual"; enable it so the loop keeps running.
+    $COMPOSE --profile manual up -d --build scraper 2>/dev/null \
+      || $COMPOSE up -d --build scraper 2>/dev/null \
+      || true
     exit 0
 fi
 

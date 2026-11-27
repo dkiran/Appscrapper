@@ -113,10 +113,15 @@ def scrape(cfg, fetcher, sleep=time.sleep):
     def sleep(sec):  # randomised so requests don't arrive at a perfectly regular rhythm
         raw_sleep(sec * random.uniform(0.7, 1.5))
 
+    stopped_early = False
+    failure_backoff = float(cfg.get("failure_backoff_seconds") or (cfg.get("delay_seconds") or 4) * 3)
+
     def fail():
         nonlocal failed, streak
         failed += 1
         streak += 1
+        # Extra pause after errors so a 429/block cools off before the next request.
+        sleep(failure_backoff)
         if streak >= limit:
             log.warning("%d failures in a row - stopping this run (possible block). Next run continues.", streak)
             raise _Stop()
@@ -160,16 +165,24 @@ def scrape(cfg, fetcher, sleep=time.sleep):
             log.info("Play-first: %d searches due (%d terms x %d countries)", len(todo), len(terms), len(play_countries))
             _run_searches(cfg, fetcher, conn, todo, known, cap, deadline, sleep, fail, ok, stats)
     except _Stop:
-        pass
+        stopped_early = True
     contacts = db.refresh_contacts(conn, cfg.get("require_ios", False), cfg.get("developer_countries"))
     total = conn.execute("SELECT COUNT(*) AS n FROM apps").fetchone()["n"]
     if cfg.get("export_csv"):
         db.export_csv(conn, cfg["csv_path"])
         db.export_contacts(conn, cfg.get("contacts_path", "data/contacts.csv"))
     log.info("contacts table: %d unique companies/emails", contacts)
-    log.info("run done: saved=%d resolved=%d failed=%d total_apps=%d", stats["saved"], stats["resolved"], failed, total)
+    log.info(
+        "run done: saved=%d resolved=%d failed=%d total_apps=%d stopped_early=%s",
+        stats["saved"], stats["resolved"], failed, total, stopped_early,
+    )
     conn.close()
-    return {"saved": stats["saved"], "failed": failed, "total": total}
+    return {
+        "saved": stats["saved"],
+        "failed": failed,
+        "total": total,
+        "stopped_early": stopped_early,
+    }
 
 
 def _run_searches(cfg, fetcher, conn, todo, known, cap, deadline, sleep, fail, ok, stats):
