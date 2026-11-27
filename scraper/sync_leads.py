@@ -272,6 +272,7 @@ def sync_leads(cfg, conn, *, dry_run=False, since=None, resync_all=False):
         "candidates": len(leads),
         "created": 0,
         "skipped": 0,
+        "campaign_enrolled": 0,
         "errors": [],
         "batches": 0,
         "dry_run": dry_run,
@@ -317,28 +318,32 @@ def sync_leads(cfg, conn, *, dry_run=False, since=None, resync_all=False):
             data = payload if isinstance(payload, dict) else {}
         created = int(data.get("created") or 0)
         skipped = int(data.get("skipped") or data.get("skippedCount") or 0)
+        enrolled = int(data.get("campaignEnrolled") or 0)
         errs = data.get("errors") or []
         summary["created"] += created
         summary["skipped"] += skipped
+        summary["campaign_enrolled"] = summary.get("campaign_enrolled", 0) + enrolled
         summary["batches"] += 1
         if errs:
             summary["errors"].extend(errs[:20])
         emails = [row["email"] for row in batch]
         record_synced_emails(conn, emails)
         log.info(
-            "sync-leads batch %d: http=%s created=%d skipped=%d errors=%d",
+            "sync-leads batch %d: http=%s created=%d skipped=%d campaign_enrolled=%d errors=%d",
             summary["batches"],
             status,
             created,
             skipped,
+            enrolled,
             len(errs),
         )
 
     mark_sync_success(conn, summary["created"], summary["skipped"])
     log.info(
-        "sync-leads done: created=%d skipped=%d batches=%d",
+        "sync-leads done: created=%d skipped=%d campaign_enrolled=%d batches=%d",
         summary["created"],
         summary["skipped"],
+        summary.get("campaign_enrolled", 0),
         summary["batches"],
     )
     return summary
