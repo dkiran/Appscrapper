@@ -450,16 +450,19 @@ def test_sync_leads_dry_run_and_idempotent_local(tmp_path):
     conn.commit()
 
     summary = sync_leads(
-        {"sync_both_stores_only": True},
+        {"sync_both_stores_only": False},
         conn,
         dry_run=True,
     )
-    assert summary["candidates"] == 1
+    assert summary["candidates"] == 2  # both-stores + Play-only
     assert summary["dry_run"] is True
-    assert summary["sample"][0]["email"] == "support@acme.io"
+    assert {row["email"] for row in summary["sample"]} == {"support@acme.io", "only@play.io"}
 
-    record_synced_emails(conn, ["support@acme.io"])
-    again = select_contacts(conn, both_stores_only=True, exclude_synced=True)
+    both_only = sync_leads({"sync_both_stores_only": True}, conn, dry_run=True)
+    assert both_only["candidates"] == 1
+
+    record_synced_emails(conn, ["support@acme.io", "only@play.io"])
+    again = select_contacts(conn, both_stores_only=False, exclude_synced=True)
     assert again == []
     conn.close()
 

@@ -218,9 +218,10 @@ def sync_leads(cfg, conn, *, dry_run=False, since=None, resync_all=False):
     """
     url = normalize_leads_url(_env_or_cfg(cfg, "SINGLEQR_LEADS_URL", "singleqr_leads_url"))
     api_key = _env_or_cfg(cfg, "SINGLEQR_LEADS_API_KEY", "singleqr_leads_api_key")
+    # Default false: push every contact with an email (Play-only, iOS-only, or both).
     both_only = _parse_bool(
-        _env_or_cfg(cfg, "SYNC_BOTH_STORES_ONLY", "sync_both_stores_only", "true"),
-        True,
+        _env_or_cfg(cfg, "SYNC_BOTH_STORES_ONLY", "sync_both_stores_only", "false"),
+        False,
     )
 
     if not dry_run and (not url or not api_key):

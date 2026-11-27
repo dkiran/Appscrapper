@@ -84,7 +84,7 @@ Pushes `contacts` rows over HTTPS into SingleQR’s import API so new scraped em
 2. On the **scraper** host (`.env` / Compose), set:
    - `SINGLEQR_LEADS_URL=https://<api-host>/api/v1/admin/leads/import-scraped`
    - `SINGLEQR_LEADS_API_KEY=<same secret>`
-   - `SYNC_BOTH_STORES_ONLY=true` (default; outreach-quality filter)
+   - `SYNC_BOTH_STORES_ONLY=false` (default: every contact with an email — Play-only, iOS-only, or both). Set `true` to limit to both-stores only.
 3. **When it runs**
    - **EC2 scrape-then-stop** (`deploy/run-and-shutdown.sh`): after the scrape finishes (and before the dashboard wait / shutdown), the boot script runs `python main.py --sync-leads` if those env vars are set. The 04:00 `sync_cron` does **not** apply here — the instance is already stopped.
    - **Always-on container**: `sync_leads_after_scrape` (default `true`) pushes right after each scrape; `sync_cron` (default `0 4 * * *` UTC) is a backup if the container stays up.
