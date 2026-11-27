@@ -1,11 +1,14 @@
 #!/bin/bash
-# Run on instance boot (systemd): one scrape, keep the dashboard up for a while, then stop the instance.
-#   touch ~/Appscrapper/stay-up   keeps the instance running (delete the file to let it stop)
+# Run on instance boot (systemd): start services, run one scrape (+ leads sync).
+# Continuous mode (default): leave the instance running so the in-container cron keeps scraping.
+# Legacy credit-saving stop: SHUTDOWN_AFTER_RUN=1 (or touch then delete stay-up after a timed wait).
+#   touch ~/Appscrapper/stay-up   also keeps the instance up when shutdown mode is enabled
 set -u
 APP_DIR="${APP_DIR:-/home/ec2-user/Appscrapper}"
-KEEP_UP_MINUTES="${KEEP_UP_MINUTES:-60}"          # how long the dashboard stays reachable after the run
+KEEP_UP_MINUTES="${KEEP_UP_MINUTES:-60}"          # only used when SHUTDOWN_AFTER_RUN=1
 MIN_HOURS_BETWEEN_RUNS="${MIN_HOURS_BETWEEN_RUNS:-20}"   # a manual start inside this window skips the scrape
 MAX_RUN_HOURS="${MAX_RUN_HOURS:-12}"
+SHUTDOWN_AFTER_RUN="${SHUTDOWN_AFTER_RUN:-0}"     # 0 = continuous (do not stop the instance)
 log() { echo "[$(date -u '+%F %T') UTC] $*"; }
 
 cd "$APP_DIR" || { log "cannot cd to $APP_DIR"; exit 1; }
@@ -51,6 +54,14 @@ if grep -q '^SINGLEQR_LEADS_URL=.\+' .env 2>/dev/null && grep -q '^SINGLEQR_LEAD
     fi
 else
     log "SINGLEQR_LEADS_URL / SINGLEQR_LEADS_API_KEY not set; skipping leads sync"
+fi
+
+if [ "$SHUTDOWN_AFTER_RUN" != "1" ] || [ -e "$APP_DIR/stay-up" ]; then
+    log "keeping instance up (continuous scraping; SHUTDOWN_AFTER_RUN=${SHUTDOWN_AFTER_RUN})"
+    event "INSTANCE STAYING UP (continuous scrape)"
+    # Ensure the always-on scraper scheduler is running (not hostschedule-only one-shot).
+    $COMPOSE up -d scraper 2>/dev/null || true
+    exit 0
 fi
 
 log "dashboard stays up for $KEEP_UP_MINUTES minutes"

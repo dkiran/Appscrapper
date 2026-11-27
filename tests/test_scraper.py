@@ -121,8 +121,13 @@ def test_no_repeat_and_ios_recheck(tmp_path):
 
 def test_all_countries_and_repeat_window(tmp_path):
     from scraper import db
+    from scraper.play_countries import PLAY_STORE_COUNTRIES
     from scraper.run import resolve_countries, db_target
-    assert "us" in resolve_countries("ALL") and len(resolve_countries("ALL")) > 200
+    all_codes = resolve_countries("ALL")
+    assert "us" in all_codes and "in" in all_codes
+    assert "aq" not in all_codes and "bv" not in all_codes
+    assert len(all_codes) == len(PLAY_STORE_COUNTRIES)
+    assert resolve_countries(["us", "aq", "IN"]) == ["us", "in"]
 
     class Good(Fake):
         searches = 0

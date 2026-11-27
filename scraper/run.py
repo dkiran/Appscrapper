@@ -5,46 +5,15 @@ import random
 import time
 from datetime import datetime, timedelta, timezone
 
-import pycountry
-
 from . import db
 from google_play_scraper.exceptions import NotFoundError
 
 from .ios import best_match, clean_url, similar
 from .categories import category_terms
 from .country import country_from_address
+from .play_countries import PLAY_STORE_COUNTRIES
 
 log = logging.getLogger("playstore")
-
-# iTunes Search rejects many ISO codes (territories / non-storefronts) with HTTP 400.
-# When config countries is ALL, App Store discovery uses this curated list instead of every pycountry code.
-APP_STORE_COUNTRIES = [
-    "ae", "ag", "ai", "al", "am", "ao", "ar", "at", "au", "az",
-    "bb", "be", "bf", "bg", "bh", "bj", "bm", "bn", "bo", "br", "bs", "bt", "bw", "by", "bz",
-    "ca", "cg", "ch", "cl", "cn", "co", "cr", "cv", "cy", "cz",
-    "de", "dk", "dm", "do", "dz",
-    "ec", "ee", "eg", "es",
-    "fi", "fj", "fm", "fr",
-    "gb", "gd", "gh", "gm", "gr", "gt", "gw", "gy",
-    "hk", "hn", "hr", "hu",
-    "id", "ie", "il", "in", "iq", "is", "it",
-    "jm", "jo", "jp",
-    "ke", "kg", "kh", "kn", "kr", "kw", "ky", "kz",
-    "la", "lb", "lc", "lk", "lr", "lt", "lu", "lv", "ly",
-    "ma", "md", "me", "mg", "mk", "ml", "mm", "mn", "mo", "mr", "ms", "mt", "mu", "mv", "mw", "mx", "my", "mz",
-    "na", "ne", "ng", "ni", "nl", "no", "np", "nz",
-    "om",
-    "pa", "pe", "pg", "ph", "pk", "pl", "pt", "pw", "py",
-    "qa",
-    "ro", "rs", "ru", "rw",
-    "sa", "sb", "sc", "se", "sg", "si", "sk", "sl", "sn", "sr", "sv", "sz",
-    "tc", "td", "th", "tj", "tm", "tn", "to", "tr", "tt", "tw", "tz",
-    "ua", "ug", "us", "uy", "uz",
-    "vc", "ve", "vg", "vn", "vu",
-    "xk",
-    "ye",
-    "za", "zm", "zw",
-]
 
 
 def _is_http_400(exc):
@@ -90,12 +59,19 @@ def db_target(cfg):
 
 
 def resolve_countries(value, *, for_app_store=False):
-    """Return ISO country codes to search. for_app_store=True uses App Store storefronts when value is ALL."""
+    """Return ISO country codes to search.
+
+    ALL → Google Play supported storefronts only (never invalid territories).
+    Explicit lists are lowercased and intersected with Play-supported codes so
+    typos / dead regions are dropped. for_app_store is kept for call-site clarity;
+    the same Play list is used (iTunes HTTP 400s are still skipped if any remain).
+    """
+    del for_app_store  # same Play-supported list for both discovery modes
+    play = {c.lower() for c in PLAY_STORE_COUNTRIES}
     if value in (None, "", "ALL"):
-        if for_app_store:
-            return list(APP_STORE_COUNTRIES)
-        return sorted(c.alpha_2.lower() for c in pycountry.countries)
-    return [c.lower() for c in value]
+        return sorted(play)
+    wanted = [str(c).lower() for c in value]
+    return [c for c in wanted if c in play]
 
 
 def due_searches(conn, countries, terms, repeat_days):
@@ -173,7 +149,7 @@ def scrape(cfg, fetcher, sleep=time.sleep):
         if mode in ("ios", "both"):
             ios_todo = due_searches(conn, ios_countries, ["ios:" + t for t in terms], cfg.get("search_repeat_days"))
             log.info(
-                "iOS-first: %d searches due (%d terms x %d App Store countries)",
+                "iOS-first: %d searches due (%d terms x %d Play-supported countries)",
                 len(ios_todo),
                 len(terms),
                 len(ios_countries),

@@ -44,7 +44,7 @@ Cold B2B email is lawful in many places but regulated: include a real sender ide
 Both CSVs end with `Play Store URL`/`App Store URL` (blank when the app isn't on that store) and a `Both Stores` column (`Yes`/`No`). In `contacts.csv` filter on `Both Stores = Yes` for apps on both stores, or on whichever URL column is non-blank for Google-Play-only / App-Store-only lists. `require_ios` is `false` by default, so `contacts.csv` contains everyone and you filter in your email tool; set it `true` to limit the file to both-store developers.
 
 ## Daily full coverage
-Defaults: `"categories": "ALL"` (all 49 categories). Prefer an explicit `"countries"` list of real markets (e.g. `us`, `in`, `gb`); `"countries": "ALL"` still works, but App Store discovery then uses a curated storefront list (not every ISO code — territories like `aq`/`bv` return HTTP 400 and used to burn the consecutive-failure budget). Unsupported App Store storefronts (HTTP 400) are marked done and do **not** stop the run. Play searches that a country doesn't serve still fail up to 3 times then skip until the repeat window. Each daily run stops at `max_new_apps_per_run` / `max_runtime_minutes`; the next run continues. A finished search comes due again after `search_repeat_days` (30).
+Defaults: `"categories": "ALL"` (configured category set). `"countries": "ALL"` uses **Google Play–supported storefront codes only** (see `scraper/play_countries.py`) — never invalid ISO territories like `aq`/`bv`. Explicit country lists are filtered to that same Play set. App Store HTTP 400s (if any) are marked done and do not stop the run. Set `max_new_apps_per_run` / `max_runtime_minutes` to `null` for continuous scraping (dedupe only).
 
 ## Staying under the radar
 Delays are randomised (about 0.7x to 1.5x of `delay_seconds`, default 4s), a run is capped at `max_new_apps_per_run` (1500) and `max_runtime_minutes`, and it stops itself after `max_consecutive_failures` (10) failed requests in a row, e.g. a 429 block, then continues on the next scheduled run. Raise volume gradually only if runs finish without failures.
@@ -125,8 +125,8 @@ Postgres is tuned small in `docker-compose.yml` and container logs are capped at
 4. `docker compose -f docker-compose.yml -f docker-compose.https.yml up -d` - Caddy fetches and renews the Let's Encrypt certificate automatically.
 The login uses HTTP Basic auth over HTTPS, wrong attempts are delayed by 1 s, and the page shows counts and log lines only (no email addresses). Log lines include app and company names.
 
-## Start the EC2 instance on a schedule, scrape once, stop it (saves credits)
-`deploy/run-and-shutdown.sh` runs when the instance boots (systemd unit `deploy/scraper-run.service`): it starts the database and dashboard, runs one scrape, **syncs new contacts to SingleQR leads** (when `SINGLEQR_LEADS_*` is set in `.env`), keeps the dashboard up for `KEEP_UP_MINUTES` (60), then stops the containers and shuts the instance down (EC2 "stop", not terminate). A boot within 20 hours of the last scrape (for example you started it by hand to look at the dashboard) skips the scrape but still attempts leads sync. `touch ~/Appscrapper/stay-up` keeps the instance running; delete the file to let it stop.
+## EC2 boot script (continuous by default)
+`deploy/run-and-shutdown.sh` starts DB/dashboard, runs one scrape + leads sync, then **keeps the instance up** so the scraper cron can continue. Set `SHUTDOWN_AFTER_RUN=1` only if you want the old credit-saving stop behaviour. `touch ~/Appscrapper/stay-up` also prevents shutdown when that mode is on.
 Use `docker-compose.hostschedule.yml` with the other compose files so the always-on scheduler container is off. AWS starts the instance with an EventBridge Scheduler rule (see the steps given in chat/README of your deployment). While the instance is stopped the dashboard is offline.
 Install on the server:
 ```bash
