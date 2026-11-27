@@ -133,6 +133,27 @@ def record_synced_emails(conn, emails):
     conn.commit()
 
 
+def contact_sync_stats(conn, both_stores_only=False):
+    """Counts for diagnosing empty sync runs."""
+    ensure_sync_tables(conn)
+    total = conn.execute("SELECT COUNT(*) AS n FROM contacts").fetchone()["n"]
+    with_email = conn.execute(
+        "SELECT COUNT(*) AS n FROM contacts WHERE COALESCE(email, '') <> ''"
+    ).fetchone()["n"]
+    both = conn.execute(
+        "SELECT COUNT(*) AS n FROM contacts WHERE COALESCE(email, '') <> '' AND both_stores = 'Yes'"
+    ).fetchone()["n"]
+    synced = len(already_synced_emails(conn))
+    pending = select_contacts(conn, both_stores_only=both_stores_only, exclude_synced=True)
+    return {
+        "contacts_total": int(total or 0),
+        "contacts_with_email": int(with_email or 0),
+        "contacts_both_stores": int(both or 0),
+        "locally_marked_synced": synced,
+        "pending_after_local_gate": len(pending),
+    }
+
+
 def select_contacts(conn, both_stores_only=True, since=None, exclude_synced=True):
     """Return contact rows ready to push. since: ISO timestamp; exclude already-synced emails."""
     ensure_sync_tables(conn)
@@ -231,10 +252,17 @@ def sync_leads(cfg, conn, *, dry_run=False, since=None, resync_all=False):
         )
 
     exclude_synced = not resync_all and not since
-    if since:
-        # Backfill mode: ignore local synced set; backend still skips duplicates.
+    if since or resync_all:
+        # Backfill / resync: ignore local synced set; backend still skips duplicates.
         exclude_synced = False
-        log.info("backfill since=%s (local synced-email gate disabled)", since)
+        log.info(
+            "local synced-email gate disabled (resync_all=%s since=%s); backend still skips duplicates",
+            bool(resync_all),
+            since or "-",
+        )
+
+    stats = contact_sync_stats(conn, both_stores_only=both_only)
+    log.info("sync-leads pool: %s", stats)
 
     contacts = select_contacts(conn, both_stores_only=both_only, since=since, exclude_synced=exclude_synced)
     scraped_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -248,10 +276,19 @@ def sync_leads(cfg, conn, *, dry_run=False, since=None, resync_all=False):
         "batches": 0,
         "dry_run": dry_run,
         "both_stores_only": both_only,
+        "pool": stats,
     }
 
     if not leads:
-        log.info("sync-leads: nothing to push (candidates=0, both_stores_only=%s)", both_only)
+        log.info(
+            "sync-leads: nothing to push (candidates=0, both_stores_only=%s, "
+            "contacts_with_email=%s, locally_marked_synced=%s). "
+            "If contacts remain unsent in SingleQR, re-run with --resync-all "
+            "(or --since 2020-01-01) so the local gate is ignored.",
+            both_only,
+            stats["contacts_with_email"],
+            stats["locally_marked_synced"],
+        )
         if not dry_run:
             mark_sync_success(conn, 0, 0)
         return summary

@@ -11,9 +11,10 @@ from scraper.run import load_config, scrape
 
 
 class _SyncArgs:
-    def __init__(self, dry_run=False, since=None):
+    def __init__(self, dry_run=False, since=None, resync_all=False):
         self.dry_run = dry_run
         self.since = since
+        self.resync_all = resync_all
 
 
 def _run_sync_leads(cfg, args):
@@ -23,12 +24,14 @@ def _run_sync_leads(cfg, args):
 
     conn = db.connect(db_target(cfg))
     try:
+        # Refresh contacts from apps so Play-only / iOS-only emails are included.
+        db.refresh_contacts(conn, cfg.get("require_ios", False), cfg.get("developer_countries"))
         summary = sync_leads(
             cfg,
             conn,
             dry_run=args.dry_run,
-            since=args.since,
-            resync_all=bool(args.since),
+            since=getattr(args, "since", None),
+            resync_all=bool(getattr(args, "resync_all", False) or getattr(args, "since", None)),
         )
         logging.info("sync-leads summary: %s", summary)
         if args.dry_run and summary.get("sample"):
@@ -64,8 +67,11 @@ def main():
                     help="push new contacts to SingleQR leads API, then exit")
     ap.add_argument("--dry-run", action="store_true",
                     help="with --sync-leads: map and count only, do not POST")
+    ap.add_argument("--resync-all", action="store_true",
+                    help="with --sync-leads: ignore local synced-email gate and push all contacts with email "
+                         "(SingleQR still skips duplicates)")
     ap.add_argument("--since", metavar="ISO",
-                    help="with --sync-leads: ignore local synced-email gate (backend still skips duplicates)")
+                    help="with --sync-leads: same as --resync-all (legacy backfill flag)")
     args = ap.parse_args()
     if args.list_categories:
         from scraper.categories import ALL_CATEGORIES
